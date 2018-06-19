@@ -71,12 +71,15 @@ func StartNode(laddr, saddr string, send, recv chan interface{}) error {
 	quit := make(chan struct{})
 	Nat :=nat.Any()
 	var realaddr *net.TCPAddr
-	go func() {
-		nat.Map(Nat, quit, "tcp", laddr1.Port, laddr1.Port, "ethereum p2p")
-	}()
-	// TODO: react to external IP changes over time.
-	if ext, err := Nat.ExternalIP(); err == nil {
-		realaddr = &net.TCPAddr{IP: ext, Port: realaddr.Port}
+
+	if !laddr1.IP.IsLoopback() && Nat != nil {
+		go func() {
+			nat.Map(Nat, quit, "tcp", laddr1.Port, laddr1.Port, "ethereum p2p")
+		}()
+		// TODO: react to external IP changes over time.
+		if ext, err := Nat.ExternalIP(); err == nil {
+			realaddr = &net.TCPAddr{IP: ext, Port: realaddr.Port}
+		}
 	}
 
 	// wait for downstream nodes to connect
