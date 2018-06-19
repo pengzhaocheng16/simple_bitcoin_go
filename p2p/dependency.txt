@@ -1,0 +1,1 @@
+模拟的adapter docker 源码依赖于node 模块
