@@ -45,9 +45,8 @@ func main() {
 
 	fmt.Println("nodekey:", nodekey)
 	fmt.Println(" Curve:", nodekey.Curve == wallet.PrivateKey.Curve)
-	fmt.Println(" PublicKey Curve:", nodekey.PublicKey.Curve == wallet.PrivateKey.PublicKey.Curve.Params())
-	fmt.Println("nodekey:", nodekey.PublicKey.Curve.Params().B)
-	fmt.Println("nodekey:", wallet.PrivateKey.PublicKey.Curve.Params().B)
+	fmt.Println(" PublicKey Curve:", nodekey.PublicKey.Curve == wallet.PrivateKey.PublicKey.Curve)
+
 	config := p2p.Config{
 		MaxPeers:   10,
 		PrivateKey: nodekey,
