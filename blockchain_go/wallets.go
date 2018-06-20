@@ -72,7 +72,10 @@ func (ws *Wallets) GetAddresses() []string {
 
 // GetWallet returns a Wallet by its address
 func (ws Wallets) GetWallet(address string) Wallet {
-	return *ws.Wallets[address]
+	wallet := *ws.Wallets[address]
+	prv,_ := crypto.ToECDSA(wallet.PrivateKey.D.Bytes())
+	wallet.PrivateKey = *prv
+	return wallet
 }
 
 // LoadFromFile loads wallets from the file

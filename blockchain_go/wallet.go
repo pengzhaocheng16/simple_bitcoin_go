@@ -3,7 +3,6 @@ package core
 import (
 	"bytes"
 	"crypto/ecdsa"
-	"crypto/rand"
 	"crypto/sha256"
 	"log"
 
@@ -88,8 +87,8 @@ func checksum(payload []byte) []byte {
 
 func newKeyPair() (ecdsa.PrivateKey, []byte) {
 	//curve := elliptic.P256()
-	curve := crypto.S256()
-	private, err := ecdsa.GenerateKey(curve, rand.Reader)
+	//private, err := ecdsa.GenerateKey(curve, rand.Reader)
+	private, err := crypto.GenerateKey()
 	if err != nil {
 		log.Panic(err)
 	}
