@@ -249,10 +249,14 @@ func (p *Peer) pingLoop() {
 	}
 }
 
+type Message string
 func (p *Peer) readLoop(errc chan<- error) {
 	defer p.wg.Done()
 	for {
 		msg, err := p.rw.ReadMsg()
+		//var myMessage Message
+		//err = msg.Decode(&myMessage)
+		//fmt.Println("=========>:",msg,"-", msg.Payload)
 		if err != nil {
 			errc <- err
 			return
@@ -402,6 +406,7 @@ func (rw *protoRW) ReadMsg() (Msg, error) {
 	select {
 	case msg := <-rw.in:
 		msg.Code -= rw.offset
+		fmt.Println("(rw *protoRW) ReadMsg():", msg)
 		return msg, nil
 	case <-rw.closed:
 		return Msg{}, io.EOF

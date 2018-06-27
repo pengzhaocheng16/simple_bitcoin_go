@@ -92,6 +92,7 @@ type MsgReadWriter interface {
 func Send(w MsgWriter, msgcode uint64, data interface{}) error {
 	size, r, err := rlp.EncodeToReader(data)
 	if err != nil {
+		fmt.Println("~~~~~rlp.EncodeToReader:", err)
 		return err
 	}
 	return w.WriteMsg(Msg{Code: msgcode, Size: uint32(size), Payload: r})
@@ -172,9 +173,12 @@ type MsgPipeRW struct {
 // WriteMsg sends a messsage on the pipe.
 // It blocks until the receiver has consumed the message payload.
 func (p *MsgPipeRW) WriteMsg(msg Msg) error {
+
+	//fmt.Println("~~~~~WriteMsg:", msg.Size,"-",msg.Payload,"-")
 	if atomic.LoadInt32(p.closed) == 0 {
 		consumed := make(chan struct{}, 1)
 		msg.Payload = &eofSignal{msg.Payload, msg.Size, consumed}
+
 		select {
 		case p.w <- msg:
 			if msg.Size > 0 {
@@ -188,6 +192,7 @@ func (p *MsgPipeRW) WriteMsg(msg Msg) error {
 		case <-p.closing:
 		}
 	}
+	fmt.Println("~~~~~ErrPipeClosed:")
 	return ErrPipeClosed
 }
 
@@ -221,6 +226,7 @@ func (p *MsgPipeRW) Close() error {
 // If content is nil, the payload is discarded and not verified.
 func ExpectMsg(r MsgReader, code uint64, content interface{}) error {
 	msg, err := r.ReadMsg()
+	fmt.Println("-----ExpectMsg(:", msg.Payload)
 	if err != nil {
 		return err
 	}
@@ -272,6 +278,7 @@ func newMsgEventer(rw MsgReadWriter, feed *event.Feed, peerID discover.NodeID, p
 // "message received" event
 func (ev *msgEventer) ReadMsg() (Msg, error) {
 	msg, err := ev.MsgReadWriter.ReadMsg()
+	fmt.Println("-----(ev *msgEventer) ReadMsg():", msg.Payload)
 	if err != nil {
 		return msg, err
 	}
@@ -282,6 +289,8 @@ func (ev *msgEventer) ReadMsg() (Msg, error) {
 		MsgCode:  &msg.Code,
 		MsgSize:  &msg.Size,
 	})
+
+	//fmt.Println("----->PeerEventTypeMsgRecv:", msg.Code)
 	return msg, nil
 }
 
