@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"../blockchain_go"
+	"../p2pprotocol"
 )
 
 func (cli *CLI) startNode(nodeID, minerAddress string) {
@@ -16,5 +17,5 @@ func (cli *CLI) startNode(nodeID, minerAddress string) {
 		}
 	}
 
-	core.StartServer(nodeID, minerAddress)
+	p2pprotocol.StartServer(nodeID, minerAddress)
 }

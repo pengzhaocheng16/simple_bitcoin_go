@@ -6,6 +6,7 @@ import (
 	"os"
 	."../boltqueue"
 	"../blockchain_go"
+	"../p2pprotocol"
 )
 
 func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
@@ -54,7 +55,17 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 		newBlock := bc.MineBlock(txs)
 		UTXOSet.Update(newBlock)
 	} else {
-		core.SendTx(core.KnownNodes[0], tx)
+		//p2pprotocol.SendTx(core.KnownNodes[0], tx)
+		i := 1
+		var p *p2pprotocol.Peer
+		for _, v := range p2pprotocol.Peers {
+			if(i<2){
+				p = v
+				break
+			}
+			i = i+1
+		}
+		p2pprotocol.SendTx(p.Rw, tx)
 	}
 
 	fmt.Println("Success!")
