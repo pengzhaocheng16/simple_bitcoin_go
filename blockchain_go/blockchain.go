@@ -410,7 +410,7 @@ func dbExists(dbFile string) bool {
 
 // make sure block is valid by checking height, and comparing the hash of the previous block
 // ,and block hash,and block pow result,and transaction consistent(time line,utxo,tx address,coinbasetx)
-func (bc *Blockchain)isBlockValid(newBlock *Block) (bool,int) {
+func (bc *Blockchain)IsBlockValid(newBlock *Block) (bool,int) {
 	var oldBlock *Block
 	var lastHashS string
 	var reason = 0
