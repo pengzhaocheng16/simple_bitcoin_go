@@ -10,6 +10,7 @@ import (
 	"os"
 	."../boltqueue"
 	"bytes"
+	"math/big"
 )
 
 const utxoBucket = "chainstate"
@@ -48,6 +49,7 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount int,minerCheck b
 			txID := hex.EncodeToString(k)
 			outs := DeserializeOutputs(v)
 			//ignore pending tx
+			fmt.Printf("UTXO txID %s \n", txID)
 			if(minerCheck||(qsize==0||MineNow_ || !txPQueue.IsExist(1,k))) {
 				//miner check transaction is legal or not
 				if(minerCheck&&!bytes.Equal(spendTxid,k)){
@@ -77,10 +79,10 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount int,minerCheck b
 
 // FindUTXO finds UTXO for a public key hash
 func (u UTXOSet) FindUTXO(pubKeyHash []byte) []TXOutput {
-		var UTXOs []TXOutput
-		db := u.Blockchain.Db
+	var UTXOs []TXOutput
+	db := u.Blockchain.Db
 
-		err := db.View(func(tx *bolt.Tx) error {
+	err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(utxoBucket))
 		c := b.Cursor()
 
@@ -96,6 +98,7 @@ func (u UTXOSet) FindUTXO(pubKeyHash []byte) []TXOutput {
 
 		return nil
 	})
+	fmt.Printf("len(UTXOs) of : %d\n", len(UTXOs))
 	if err != nil {
 		log.Panic(err)
 	}
@@ -173,52 +176,52 @@ func (u UTXOSet) Reindex() {
 func (u UTXOSet) Update(block *Block) {
 	db := u.Blockchain.Db
 
+	fmt.Printf("--->update utxo \n")
 	err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(utxoBucket))
 
 		for _, tx := range block.Transactions {
 			if tx.IsCoinbase() == false {
-					for _, vin := range tx.Vin {
+				for _, vin := range tx.Vin {
 					updatedOuts := TXOutputs{}
 
 					fmt.Printf("vin.Txid %x \n", vin.Txid)
-					outsBytes := b.Get(vin.Txid)
-					fmt.Printf("len(outsBytes) %d \n", len(outsBytes))
-					outs := DeserializeOutputs(outsBytes)
+					outs := tx.Vout
 
-					fmt.Printf("len(outs.Outputs) %x \n", len(outs.Outputs))
-					for outidx, out := range outs.Outputs {
-						if outidx != vin.Vout {
+					fmt.Printf("len(outs.Outputs) %x \n", len(outs))
+					for outidx, out := range outs {
+						//if outidx != vin.Vout {
 							fmt.Printf("outidx %d \n", outidx)
 							fmt.Printf("vin.Vout %d \n", out.Value)
 							updatedOuts.Outputs = append(updatedOuts.Outputs, out)
-						}
+						//}
 					}
 					fmt.Printf("len(updatedOuts.Outputs) %x \n", len(updatedOuts.Outputs))
 
-					if len(updatedOuts.Outputs) == 0 {
-						err := b.Delete(vin.Txid)
-						if err != nil {
-							log.Panic(err)
-						}
-					} else {
-						err := b.Put(vin.Txid, updatedOuts.Serialize())
+
+					if len(updatedOuts.Outputs) != 0 {
+						err := b.Put(tx.ID, updatedOuts.Serialize())
 						if err != nil {
 							log.Panic(err)
 						}
 					}
+					err := b.Delete(vin.Txid)
+					if err != nil {
+						log.Panic(err)
+					}
 
 				}
-			}
+			}else{
 
-			newOutputs := TXOutputs{}
-			for _, out := range tx.Vout {
-				newOutputs.Outputs = append(newOutputs.Outputs, out)
-			}
+				newOutputs := TXOutputs{}
+				for _, out := range tx.Vout {
+					newOutputs.Outputs = append(newOutputs.Outputs, out)
+				}
 
-			err := b.Put(tx.ID, newOutputs.Serialize())
-			if err != nil {
-				log.Panic(err)
+				err := b.Put(tx.ID, newOutputs.Serialize())
+				if err != nil {
+					log.Panic(err)
+				}
 			}
 		}
 
@@ -231,14 +234,14 @@ func (u UTXOSet) Update(block *Block) {
 
 
 // verify transaction:timeLine UTXOAmount coinbaseTX
-func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime int64,block *Block) bool {
+func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Block) bool {
 	//TODO timeline check
-	var coinbaseNumber = 0;
-	var coinbaseReward = 0;
+	var coinbaseNumber = 0
+	var coinbaseReward = 0
 	for _, tx := range block.Transactions {
 
 		if tx.IsCoinbase() == false {
-			return u.isUTXOAmountValid(tx)
+			return u.IsUTXOAmountValid(tx)
 		}else{
 			coinbaseNumber = coinbaseNumber +1;
 			coinbaseReward = tx.Vout[0].Value
@@ -247,7 +250,11 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime int64,block *Block)
 	//fmt.Printf("coinbaseReward %s \n", math.Pow(0.5, math.Floor(float64(block.Height/halfRewardblockCount)))*subsidy )
 	//fmt.Printf("coinbaseReward %s \n", coinbaseReward)
 	//in that block reward timeperiod less than that currenteward
-	if(math.Pow(0.5, math.Floor(float64(block.Height/halfRewardblockCount)))*subsidy != float64(coinbaseReward)){
+	if(math.Pow(0.5, math.Floor(float64(block.Height.Int64()/halfRewardblockCount)))*subsidy != float64(coinbaseReward)){
+		return false
+	}
+	if(block.Timestamp.Cmp(lastBlockTime) <=0 ){
+		fmt.Println("Timestamp.Cmp(lastBlockTime)  \n")
 		return false
 	}
 	//fmt.Printf("coinbaseNumber %s \n", coinbaseNumber)
@@ -258,7 +265,7 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime int64,block *Block)
 	return true
 }
 
-func (u UTXOSet) isUTXOAmountValid(tx *Transaction) bool{
+func (u UTXOSet) IsUTXOAmountValid(tx *Transaction) bool{
 	pubKeyHash := HashPubKey(tx.Vin[0].PubKey)
 	acc, _ :=
 		u.FindSpendableOutputs(pubKeyHash, tx.Vout[0].Value,true,tx.Vin[0].Txid)

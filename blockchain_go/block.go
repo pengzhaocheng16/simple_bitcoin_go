@@ -6,22 +6,54 @@ import (
 	"log"
 	"time"
 	"fmt"
+	"math/big"
+)
+
+// Some weird constants to avoid constant memory allocs for them.
+var (
+	expDiffPeriod = big.NewInt(100000)
+	big1          = big.NewInt(1)
+	big2          = big.NewInt(2)
+	big4          = big.NewInt(4)
+	big9          = big.NewInt(9)
+	big10         = big.NewInt(10)
+	bigMinus99    = big.NewInt(-99)
+	big2999999    = big.NewInt(2999999)
+)
+
+var (
+	DifficultyBoundDivisor = big.NewInt(2)   // The bound divisor of the difficulty, used in the update calculations.
+	GenesisDifficulty      = big.NewInt(4) // Difficulty of the Genesis block.
+	MinimumDifficulty      = big.NewInt(4) // The minimum that the difficulty may ever be.
+	DurationLimit          = big.NewInt(13)     // The decision boundary on the blocktime duration used to determine whether difficulty should go up or not.
 )
 
 // Block represents a block in the blockchain
 type Block struct {
-	Timestamp     int64
+	Timestamp     *big.Int
 	Transactions  []*Transaction
 	PrevBlockHash []byte
 	Hash          []byte
 	Nonce         int
-	Height        int
+	Height        *big.Int
+	Difficulty    *big.Int
+	ReceivedAt    time.Time
 }
 
 // NewBlock creates and returns Block
-func NewBlock(transactions []*Transaction, prevBlockHash []byte, height int) *Block {
-	block := &Block{time.Now().Unix(), transactions, prevBlockHash, []byte{}, 0, height}
-	pow := NewProofOfWork(block)
+func NewBlock(transactions []*Transaction, prevBlockHash []byte, height *big.Int,genesis bool,bc *Blockchain) *Block {
+	var dif *big.Int
+	timetime := time.Now()
+	time64 := timetime.Unix()
+	time := new(big.Int).SetInt64(time64)
+	if (!genesis && bc != nil) {
+		preBlock, _ := bc.GetBlock(prevBlockHash)
+		dif = CalcDifficulty(time.Uint64(), &preBlock)
+	}else{
+		dif = big4
+	}
+	block := &Block{ time, transactions, prevBlockHash, []byte{}, 0, height,dif, timetime}
+	pow := NewProofOfWork(block,dif.Int64())
 	nonce, hash := pow.Run()
 
 	block.Hash = hash[:]
@@ -33,7 +65,7 @@ func NewBlock(transactions []*Transaction, prevBlockHash []byte, height int) *Bl
 
 // NewGenesisBlock creates and returns genesis Block
 func NewGenesisBlock(coinbase *Transaction) *Block {
-	return NewBlock([]*Transaction{coinbase}, []byte{}, 0)
+	return NewBlock([]*Transaction{coinbase}, []byte{}, big.NewInt(0),true,nil)
 }
 
 // HashTransactions returns a hash of the transactions in the block
@@ -67,7 +99,7 @@ func (b *Block) Serialize() []byte {
 func DeserializeBlock(d []byte) *Block {
 	var block Block
 
-	fmt.Printf("len(d) %d \n", len(d))
+	//fmt.Printf("len(d) %d \n", len(d))
 	decoder := gob.NewDecoder(bytes.NewReader(d))
 	err := decoder.Decode(&block)
 	if err != nil {
@@ -76,3 +108,85 @@ func DeserializeBlock(d []byte) *Block {
 
 	return &block
 }
+
+// CalcDifficulty is the difficulty adjustment algorithm. It returns
+// the difficulty that a new block should have when created at time
+// given the parent block's time and difficulty.
+//func (b *Block) CalcDifficulty(chain consensus.ChainReader, time uint64, parent *types.Header) *big.Int {
+func (b *Block) CalcDifficulty(time uint64, parent *Block) *big.Int {
+	return CalcDifficulty(time, parent)
+}
+
+// CalcDifficulty is the difficulty adjustment algorithm. It returns
+// the difficulty that a new block should have when created at time
+// given the parent block's time and difficulty.
+//func CalcDifficulty(config *params.ChainConfig, time uint64, parent *types.Header) *big.Int {
+func CalcDifficulty(time uint64, parent *Block) *big.Int {
+	//next := new(big.Int).Add(parent.Number, big1)
+	//switch {
+	//case config.IsByzantium(next):
+		//return calcDifficultyByzantium(time, parent)
+	//case config.IsHomestead(next):
+		return calcDifficultyHomestead(time, parent)
+	//default:
+	//	return calcDifficultyFrontier(time, parent)
+	//}
+}
+
+
+// calcDifficultyHomestead is the difficulty adjustment algorithm. It returns
+// the difficulty that a new block should have when created at time given the
+// parent block's time and difficulty. The calculation uses the Homestead rules.
+func calcDifficultyHomestead(time uint64, parent *Block) *big.Int {
+	// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.md
+	// algorithm:
+	// diff = (parent_diff +
+	//         (parent_diff / 2048 * max(1 - (block_timestamp - parent_timestamp) // 10, -99))
+	//        ) + 2^(periodCount - 2)
+
+	bigTime := new(big.Int).SetUint64(time)
+	bigParentTime := new(big.Int).Set(parent.Timestamp)
+
+	// holds intermediate values to make the algo easier to read & audit
+	x := new(big.Int)
+	y := new(big.Int)
+
+	// 1 - (block_timestamp - parent_timestamp) // 10
+	x.Sub(bigTime, bigParentTime)
+	fmt.Printf("(block_timestamp - parent_timestamp) == %d \n", x.Int64())
+	x.Div(x, big10)
+	x.Sub(big1, x)
+	fmt.Printf("1 - (block_timestamp - parent_timestamp) // 10 == %d \n", x.Int64())
+
+	// max(1 - (block_timestamp - parent_timestamp) // 10, -99)
+	if x.Cmp(bigMinus99) < 0 {
+		x.Set(bigMinus99)
+	}
+	fmt.Printf("max(1 - (block_timestamp - parent_timestamp) == %d \n", x.Int64())
+	// (parent_diff + parent_diff // 2048 * max(1 - (block_timestamp - parent_timestamp) // 10, -99))
+	y.Div(parent.Difficulty, DifficultyBoundDivisor)
+	x.Mul(y, x)
+	x.Add(parent.Difficulty, x)
+	fmt.Printf("parent_diff + parent_diff // %d * max == %d \n", DifficultyBoundDivisor,x.Int64())
+
+	// minimum difficulty can ever be (before exponential factor)
+	if x.Cmp(MinimumDifficulty) < 0 {
+		x.Set(MinimumDifficulty)
+	}
+	fmt.Printf("x.Set(params.MinimumDifficulty) == %d \n", x.Int64())
+	// for the exponential factor
+	periodCount := new(big.Int).Add(parent.Height, big1)
+	periodCount.Div(periodCount, expDiffPeriod)
+	fmt.Printf("(parent.Height+1)//10000 == %d \n", periodCount.Int64())
+
+	// the exponential factor, commonly referred to as "the bomb"
+	// diff = diff + 2^(periodCount - 2)
+	if periodCount.Cmp(big1) > 0 {
+		y.Sub(periodCount, big2)
+		y.Exp(big2, y, nil)
+		x.Add(x, y)
+	}
+	fmt.Printf("diff = diff + 2^(periodCount - 2) == %d \n", x.Int64())
+	return x
+}
+

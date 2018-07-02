@@ -12,7 +12,8 @@ var (
 	maxNonce = math.MaxInt64
 )
 
-const targetBits = 4
+//const targetBits = 4
+var targetBitsVar int64
 
 // ProofOfWork represents a proof-of-work
 type ProofOfWork struct {
@@ -21,9 +22,11 @@ type ProofOfWork struct {
 }
 
 // NewProofOfWork builds and returns a ProofOfWork
-func NewProofOfWork(b *Block) *ProofOfWork {
+func NewProofOfWork(b *Block,targetBits int64) *ProofOfWork {
 	target := big.NewInt(1)
+	fmt.Printf("--->",targetBits)
 	target.Lsh(target, uint(256-targetBits))
+	targetBitsVar = targetBits
 
 	pow := &ProofOfWork{b, target}
 
@@ -35,8 +38,8 @@ func (pow *ProofOfWork) prepareData(nonce int) []byte {
 		[][]byte{
 			pow.block.PrevBlockHash,
 			pow.block.HashTransactions(),
-			IntToHex(pow.block.Timestamp),
-			IntToHex(int64(targetBits)),
+			IntToHex(pow.block.Timestamp.Int64()),
+			IntToHex(int64(targetBitsVar)),
 			IntToHex(int64(nonce)),
 		},
 		[]byte{},

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"math/big"
 	"strings"
+	"io"
 
 	"encoding/gob"
 	"encoding/hex"
@@ -14,6 +15,9 @@ import (
 	"log"
 	"time"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/common"
+	"sync/atomic"
 )
 
 const subsidy = 50
@@ -24,6 +28,15 @@ type Transaction struct {
 	Vin  []TXInput
 	Vout []TXOutput
 	Timestamp     int64
+	size atomic.Value
+}
+// Transactions is a Transaction slice type for basic sorting.
+type Transactions []*Transaction
+type writeCounter common.StorageSize
+
+func (c *writeCounter) Write(b []byte) (int, error) {
+	*c += writeCounter(len(b))
+	return len(b), nil
 }
 
 // IsCoinbase checks whether the transaction is coinbase
@@ -125,7 +138,10 @@ func (tx *Transaction) TrimmedCopy() Transaction {
 		outputs = append(outputs, TXOutput{vout.Value, vout.PubKeyHash})
 	}
 
-	txCopy := Transaction{tx.ID, inputs, outputs,tx.Timestamp}
+	var v = atomic.Value{}
+	v.Store(0)
+	txCopy := Transaction{tx.ID, inputs, outputs,tx.Timestamp,v}
+	//txCopy.size.Store(tx.Size())
 
 	return txCopy
 }
@@ -188,7 +204,9 @@ func NewCoinbaseTX(to, data string) *Transaction {
 
 	txin := TXInput{[]byte{}, -1, nil, []byte(data)}
 	txout := NewTXOutput(subsidy, to)
-	tx := Transaction{nil, []TXInput{txin}, []TXOutput{*txout}, time.Now().Unix()}
+	var v = atomic.Value{}
+	v.Store(0)
+	tx := Transaction{nil, []TXInput{txin}, []TXOutput{*txout}, time.Now().Unix(),v}
 	tx.ID = tx.Hash()
 
 	return &tx
@@ -225,7 +243,9 @@ func NewUTXOTransaction(wallet *Wallet, to string, amount int, UTXOSet *UTXOSet)
 		outputs = append(outputs, *NewTXOutput(acc-amount, from)) // a change
 	}
 
-	tx := Transaction{nil, inputs, outputs, time.Now().Unix()}
+	var v = atomic.Value{}
+	v.Store(0)
+	tx := Transaction{nil, inputs, outputs, time.Now().Unix(),v}
 	tx.ID = tx.Hash()
 	UTXOSet.Blockchain.SignTransaction(&tx, wallet.PrivateKey)
 
@@ -258,4 +278,34 @@ func VeryfyFromToAddress(tx *Transaction) bool{
 		}
 	}
 	return true
+}
+
+
+// EncodeRLP implements rlp.Encoder
+func (tx *Transaction) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, &tx)
+}
+
+// DecodeRLP implements rlp.Decoder
+func (tx *Transaction) DecodeRLP(s *rlp.Stream) error {
+	_, size, _ := s.Kind()
+	err := s.Decode(&tx)
+	if err == nil {
+		tx.size.Store(common.StorageSize(rlp.ListSize(size)))
+	}
+
+	return err
+}
+
+
+// Size returns the true RLP encoded storage size of the transaction, either by
+// encoding and returning it, or returning a previsouly cached value.
+func (tx *Transaction) Size() common.StorageSize {
+	if size := tx.size.Load(); size != nil {
+		return size.(common.StorageSize)
+	}
+	c := writeCounter(0)
+	rlp.Encode(&c, &tx)
+	tx.size.Store(common.StorageSize(c))
+	return common.StorageSize(c)
 }

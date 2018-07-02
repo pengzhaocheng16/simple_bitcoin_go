@@ -14,20 +14,32 @@ import (
 	"../p2p"
 	"../p2p/discover"
 	"../blockchain_go"
+	"strings"
+	"math/big"
+	"github.com/ethereum/go-ethereum/common"
+	"math/rand"
+	"os"
+	."../boltqueue"
 )
 
 const protocol = "tcp"
 const nodeVersion = 1
 const commandLength = 12
+// This is the target size for the packs of transactions sent by txsyncLoop.
+// A pack can get larger than this if a single transactions exceeds this size.
+const txsyncPackSize = 100 * 1024
 
 var nodeAddress string
 var miningAddress string
-var KnownNodes = []string{"192.168.1.196:2000"}
+var BootNodes = []string{"192.168.1.196:2000"}
+var BootPeers = []*discover.Node{}
+var CurrentNodeInfo *p2p.NodeInfo
 var blocksInTransit = [][]byte{}
-var mempool = make(map[string]core.Transaction)
 
 var send = make(chan interface{}, 1)
 
+var node_id string
+var Manager *ProtocolManager
 
 type Node struct {
 	AddrList []string
@@ -66,8 +78,8 @@ type tx struct {
 
 type verzion struct {
 	Version    int
-	BestHeight int
-	lastHash string
+	BestHeight *big.Int
+	LastHash string
 	AddrFrom   string
 }
 
@@ -103,13 +115,13 @@ func extractCommand(request []byte) []byte {
 }
 
 func requestBlocks() {
-	//for _, node := range KnownNodes {
+	//for _, node := range BootNodes {
 		//sendGetBlocks(node)
 	//}
 }
 
 func sendAddr(address p2p.MsgWriter) {
-	nodes := addr{KnownNodes}
+	nodes := addr{BootNodes}
 	nodes.AddrList = append(nodes.AddrList, nodeAddress)
 	payload := gobEncode(nodes)
 	//request := append(commandToBytes("addr"), payload...)
@@ -121,7 +133,7 @@ func sendAddr(address p2p.MsgWriter) {
 	sendDataC(address, command)
 }
 
-func sendBlock(addr p2p.MsgWriter, b *core.Block) {
+func sendBlock(addr p2p.MsgWriter, b *core.Block) error{
 	fmt.Printf("send Block %s \n", b)
 	fmt.Printf("send Block hash %x \n", b.Hash)
 	data := block{nodeAddress, b.Serialize()}
@@ -134,7 +146,7 @@ func sendBlock(addr p2p.MsgWriter, b *core.Block) {
 		Data:payload,
 	}
 
-	sendDataC(addr, command)
+	return sendDataC(addr, command)
 }
 
 func sendData(addr string, data []byte) {
@@ -180,13 +192,13 @@ func sendData(addr string, data []byte) {
 			fmt.Printf("%s is not available\n", addr)
 			var updatedNodes []string
 
-			for _, node := range KnownNodes {
+			for _, node := range BootNodes {
 				if node != addr {
 					updatedNodes = append(updatedNodes, node)
 				}
 			}
 
-			KnownNodes = updatedNodes
+			BootNodes = updatedNodes
 
 			return
 		}
@@ -212,7 +224,7 @@ func sendDataC(w p2p.MsgWriter, data Command) error{
 	return err
 }
 
-func sendInv(addr p2p.MsgWriter, kind string, items [][]byte) {
+func sendInv(addr p2p.MsgWriter, kind string, items [][]byte) error{
 	inventory := inv{nodeAddress, kind, items}
 	payload := gobEncode(inventory)
 	//request := append(commandToBytes("inv"), payload...)
@@ -222,7 +234,7 @@ func sendInv(addr p2p.MsgWriter, kind string, items [][]byte) {
 		Data:payload,
 	}
 
-	sendDataC(addr, command)
+	return sendDataC(addr, command)
 }
 
 func sendGetBlocks(addr p2p.MsgWriter, lastHash string) {
@@ -249,10 +261,12 @@ func sendGetData(addr p2p.MsgWriter, kind string, id []byte) {
 	sendDataC(addr, command)
 }
 
-func SendTx(addr p2p.MsgWriter, tnx *core.Transaction) {
+func SendTx(p *Peer,addr p2p.MsgWriter, tnx *core.Transaction) {
 	data := tx{nodeAddress, tnx.Serialize()}
 	payload := gobEncode(data)
 	//request := append(commandToBytes("tx"), payload...)
+
+	p.MarkTransaction(tnx.ID)
 
 	command := Command{
 		Command:"tx",
@@ -267,10 +281,32 @@ func SendVersion(addr p2p.MsgWriter, bc *core.Blockchain) {
 	payload := gobEncode(verzion{nodeVersion, bestHeight,lastHash, nodeAddress})
 	//request := append(commandToBytes("version"), payload...)
 
+
 	command := Command{
 		Command:"version",
 		Data:payload,
 	}
+	log.Print("send version --",bestHeight)
+
+	sendDataC(addr, command)
+}
+
+func SendVersionStartConflict(addr p2p.MsgWriter, historyLasthash []byte, bc *core.Blockchain) {
+	historyLastblock,err := bc.GetBlock(historyLasthash)
+	if err != nil {
+		log.Panic("create queue error",err)
+	}
+	bestHeight := historyLastblock.Height
+	lasthash := hex.EncodeToString(historyLasthash)
+	version := verzion{nodeVersion, bestHeight,lasthash, nodeAddress}
+	payload := gobEncode(version)
+	//request := append(commandToBytes("version"), payload...)
+
+	command := Command{
+		Command:"version",
+		Data:payload,
+	}
+	log.Print("send version --",bestHeight)
 
 	sendDataC(addr, command)
 }
@@ -286,8 +322,8 @@ func handleAddr(command Command) {
 		log.Panic(err)
 	}
 
-	KnownNodes = append(KnownNodes, payload.AddrList...)
-	fmt.Printf("There are %d known nodes now!\n", len(KnownNodes))
+	BootNodes = append(BootNodes, payload.AddrList...)
+	fmt.Printf("There are %d known nodes now!\n", len(BootNodes))
 	requestBlocks()
 }
 
@@ -295,7 +331,6 @@ func handleAddr(command Command) {
  1 validate every incoming block before adding it to the blockchain.
  2 Instead of running UTXOSet.Reindex(), UTXOSet.Update(block) should be used,
 because if blockchain is big,it’ll take a lot of time to reindex the whole UTXO set.
- 3 if transaction confirmation number less than 6 send 1 confirmation broadcast
  */
 func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 	var buff bytes.Buffer
@@ -309,12 +344,19 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 	}
 
 	blockData := payload.Block
-	fmt.Printf("Recevied new Block len %n \n", len(blockData))
+	fmt.Println("Recevied new Block len %n \n", len(blockData))
 	block := core.DeserializeBlock(blockData)
+	fmt.Println("Recevied new Block hash %x \n", block.Hash)
 
 	valid,reason := bc.IsBlockValid(block)
 	if(valid){
 		bc.AddBlock(block)
+		Manager.CurrTd = block.Height
+		p.knownBlocks.Add(hex.EncodeToString(block.Hash))
+
+		time := time.Now()
+		block.ReceivedAt = time
+		//Manager.BroadcastBlock(block,true)
 	}else{
 		fmt.Printf("Block not Valid reason %d  %x\n",reason,block.Hash)
 		return
@@ -334,6 +376,24 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 	} else {
 		//UTXOSet := UTXOSet{bc}
 		//UTXOSet.Reindex()
+
+		//after version command finished remove version command from queue
+		/*queueFile := fmt.Sprintf("version_%s.db", node_id)
+		versionPQueue, err := NewPQueue(queueFile)
+		if err != nil {
+			log.Panic("create queue error",err)
+		}
+		defer versionPQueue.Close()
+		defer os.Remove(queueFile)
+
+		size,_ := versionPQueue.Size(1)
+		fmt.Printf("version queue size %d\n", size)
+		if(size > 0){
+			versionPQueue.Dequeue()
+		}*/
+		for _,peer := range Manager.Peers.Peers{
+			SendVersion(peer.Rw, bc)
+		}
 	}
 	UTXOSet := core.UTXOSet{bc}
 	UTXOSet.Update(block)
@@ -371,7 +431,7 @@ func handleInv(p *Peer,command Command, bc *core.Blockchain) {
 	if payload.Type == "tx" {
 		txID := payload.Items[0]
 
-		if mempool[hex.EncodeToString(txID)].ID == nil {
+		if Manager.txMempool[hex.EncodeToString(txID)].ID == nil {
 			//sendGetData(payload.AddrFrom, "tx", txID)
 			sendGetData(p.Rw, "tx", txID)
 		}
@@ -393,10 +453,28 @@ func handleGetBlocks(p *Peer,command Command, bc *core.Blockchain) {
 		log.Panic(err)
 	}
 
+	if( p.forkDrop != nil){
+		// Disable the fork drop timer
+		p.forkDrop.Stop()
+		p.forkDrop = nil
+	}
+
 	blocks := bc.GetBlockHashes(payload.LastHash)
+	var blocksToS = [][]byte{}
+
 	if(len(blocks) != 0) {
-		//sendInv(payload.AddrFrom, "block", blocks)
-		sendInv(p.Rw, "block", blocks)
+		for _, b := range blocks{
+			hashStr := hex.EncodeToString(b)
+			if(!p.knownBlocks.Has(hashStr)){
+				p.knownBlocks.Add(hashStr)
+				blocksToS = append(blocksToS,b)
+			}
+		}
+		log.Println("==<len(blocksToS) %d",len(blocksToS))
+		if(len(blocksToS)>0){
+			sendInv(p.Rw, "block", blocksToS)
+			//sendInv(payload.AddrFrom, "block", blocks)
+		}
 	}
 }
 
@@ -423,15 +501,16 @@ func handleGetData(p *Peer,command Command, bc *core.Blockchain) {
 
 	if payload.Type == "tx" {
 		txID := hex.EncodeToString(payload.ID)
-		tx := mempool[txID]
+		tx := Manager.txMempool[txID]
 
 		//SendTx(payload.AddrFrom, &tx)
-		SendTx(p.Rw, &tx)
+		SendTx(p, p.Rw, tx)
 		//TODO delete from queue after user new transaction been comfirmed
 		// delete(queue, txID)
 	}
 }
 
+//  broadcast block after txs mined
 func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 	var buff bytes.Buffer
 	var payload tx
@@ -445,25 +524,71 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 
 	txData := payload.Transaction
 	tx := core.DeserializeTransaction(txData)
-	mempool[hex.EncodeToString(tx.ID)] = tx
-	//TODO no miner node instead of KnownNodes[0]
-	if nodeAddress == KnownNodes[0] {
-		for _, node := range KnownNodes {
+	Manager.txMempool[hex.EncodeToString(tx.ID)] = &tx
+
+	//broadcast new pending tx
+	if len(Manager.txMempool) >= 2{
+		p.MarkTransaction(tx.ID)
+		var txs core.Transactions
+		for id := range Manager.txMempool {
+			tx := Manager.txMempool[id]
+			txs = append(txs, tx)
+		}
+		Manager.BroadcastTxs(txs)
+	}
+	if nodeAddress == BootNodes[0] {
+		/*for _, node := range BootNodes {
 			if node != nodeAddress && node != payload.AddFrom {
 				//sendInv(node, "tx", [][]byte{tx.ID})
 				sendInv(p.Rw, "tx", [][]byte{tx.ID})
 			}
-		}
+		}*/
+		//sendInv(p.Rw, "tx", [][]byte{tx.ID})
 	} else {
-		if len(mempool) >= 2 && len(miningAddress) > 0 {
+		if len(Manager.txMempool) >= 2 && len(miningAddress) > 0 {
 		MineTransactions:
 			var txs []*core.Transaction
-
-			for id := range mempool {
-				tx := mempool[id]
-				if bc.VerifyTransaction(&tx) {
-					txs = append(txs, &tx)
+			//wait block sync complete
+		Loopsync:
+			for{
+				td,_ := bc.GetBestHeight()
+				//if(Manager.Peers.BestPeer().td != td){
+				if(Manager.BigestTd != td){//Manager.CurrTd
+						time.Sleep(1*time.Millisecond)
+				}else{
+					break Loopsync
 				}
+			}
+
+			for id := range Manager.txMempool {
+				tx := Manager.txMempool[id]
+				if tx == nil {
+					fmt.Println("transaction %x is nil:",id)
+					continue
+				}
+				// ignore transaction if it's not valid
+				// 1 have received longest chain among knownodes(full nodes)
+				// 2 transaction have valid sign accounding to owner's pubkey by VerifyTransaction()
+				// 3 utxo amount >= transaction output amount
+				// 4 transaction from address not equal to address
+				var valid1 = true
+				var valid2 = true
+				var valid3 = true
+				if !bc.VerifyTransaction(tx) {
+					log.Panic("ERROR: Invalid transaction:sign")
+					valid1 = false
+				}
+				UTXOSet := core.UTXOSet{bc}
+				if(tx.IsCoinbase()==false&&!UTXOSet.IsUTXOAmountValid(tx)){
+					log.Panic("ERROR: Invalid transaction:amount")
+					valid2 = false
+				}
+				valid3 = core.VeryfyFromToAddress(tx)
+				if(valid1 && valid2 && valid3){
+					txs = append(txs, tx)
+				}
+				fmt.Printf("valid3  %s\n", valid3)
+
 			}
 
 			if len(txs) == 0 {
@@ -481,19 +606,23 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 				UTXOSet.Update(newBlock)
 				fmt.Println("New block is mined!")
 
-				for _, node := range KnownNodes {
+				for _, node := range BootNodes {
 					if node != nodeAddress {
 						//sendInv(node, "block", [][]byte{newBlock.Hash})
-						sendInv(p.Rw, "block", [][]byte{newBlock.Hash})
+						//sendInv(p.Rw, "block", [][]byte{newBlock.Hash})
+						//Manager.BroadcastBlock(newBlock,true)
+						for _,peer := range Manager.Peers.Peers {
+							SendVersion(peer.Rw,bc)
+						}
 					}
 				}
 			}
 			for _, tx := range txs {
 				txID := hex.EncodeToString(tx.ID)
-				delete(mempool, txID)
+				delete(Manager.txMempool, txID)
 			}
 
-			if len(mempool) > 0 {
+			if len(Manager.txMempool) > 0 {
 				goto MineTransactions
 			}
 		}
@@ -512,22 +641,57 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 		log.Panic(err)
 	}
 
-	//fmt.Println("receive payload：", payload.BestHeight)
-	myBestHeight,myLastHash := bc.GetBestHeight()
+	log.Println("==>handle version receive payload BestHeight：", payload.BestHeight)
+	myBestHeight,myLastHash := bc.GetBestHeightLastHash()
+	myLastHashStr := hex.EncodeToString(myLastHash)
 	foreignerBestHeight := payload.BestHeight
 
-	if myBestHeight < foreignerBestHeight {
+	p.td = foreignerBestHeight
+
+	if myBestHeight.Cmp(foreignerBestHeight) <= 0 {
 		//sendGetBlocks(payload.AddrFrom,myLastHash)
-		sendGetBlocks(p.Rw,myLastHash)
-	} else if myBestHeight > foreignerBestHeight {
+		if(myBestHeight.Cmp(foreignerBestHeight) < 0&&Manager.Peers.BestPeer().td == foreignerBestHeight){
+			Manager.BigestTd = foreignerBestHeight
+			enqueueVersion(myLastHash)
+			sendGetBlocks(p.Rw,myLastHashStr)
+		}
+	} else if myBestHeight.Cmp(foreignerBestHeight) > 0 {
 		//sendVersion(payload.AddrFrom, bc)
-		SendVersion(p.Rw, bc)
+		//SendVersion(p.Rw, bc)
+
+		//check possible conflict fork
+		//if there is conflict send  conflict msg to the node and ignore this node
+		peerLastHash,err1 := hex.DecodeString(payload.LastHash)
+		if err1 != nil {
+			log.Panic(err1)
+		}
+		_,err2 := bc.GetBlock(peerLastHash)
+		if(err2 != nil){
+			log.Panic(err2)
+			data := statusData{
+				uint32(1),
+				CurrentNodeInfo.ID,
+				myBestHeight,
+				myLastHash,
+				bc.GenesisHash,
+			}
+			payload := gobEncode(data)
+			p2p.Send(p.Rw, StatusMsg, &Command{"conflict",payload})
+			return
+		}
+	}
+
+	if( p.forkDrop != nil){
+		// Disable the fork drop timer
+		p.forkDrop.Stop()
+		p.forkDrop = nil
 	}
 
 	//sendAddr(payload.AddrFrom)
-	if !nodeIsKnown(payload.AddrFrom) {
-		KnownNodes = append(KnownNodes, payload.AddrFrom)
-	}
+	//if !nodeIsKnown(payload.AddrFrom) {
+	//	BootNodes = append(BootNodes, payload.AddrFrom)
+	//}
+
 }
 
 //func handleConnection(conn net.Conn, bc *core.Blockchain) {
@@ -537,7 +701,7 @@ func HandleConnection(p *Peer,command Command, bc *core.Blockchain) {
 	//	log.Panic(err)
 	//}
 	//command := bytesToCommand(request[:commandLength])
-	fmt.Printf("Received %s command\n", command)
+	fmt.Printf("Received %s command\n", command.Command)
 
 	switch command.Command {
 	case "addr":
@@ -554,6 +718,8 @@ func HandleConnection(p *Peer,command Command, bc *core.Blockchain) {
 		handleTx(p,command, bc)
 	case "version":
 		handleVersion(p,command, bc)
+	case "conflict":
+		handleConflict(p,command, bc)
 	default:
 		fmt.Println("Unknown command!")
 	}
@@ -566,7 +732,7 @@ func HandleConnection(p *Peer,command Command, bc *core.Blockchain) {
 	var data = requestR.Data.([]byte)
 	var request = data
 
-	fmt.Printf("There are %d known nodes now!\n", len(KnownNodes))
+	fmt.Printf("There are %d known nodes now!\n", len(BootNodes))
 	command := bytesToCommand(request[:commandLength])
 	fmt.Printf("Received %s command\n", command)
 
@@ -594,6 +760,8 @@ func HandleConnection(p *Peer,command Command, bc *core.Blockchain) {
 // StartServer starts a node
 func StartServer(nodeID, minerAddress string) {
 	//nodeAddress = fmt.Sprintf("localhost:%s", nodeID)
+	srp := strings.NewReplacer(":", "_")
+	node_id = srp.Replace(nodeID)
 	nodeAddress = nodeID
 
 	miningAddress = minerAddress
@@ -608,7 +776,7 @@ func StartServer(nodeID, minerAddress string) {
 /*
 	recv := make(chan interface{}, 1)
 	var laddr = nodeAddress
-	var saddr = KnownNodes[0]
+	var saddr = BootNodes[0]
 
 		// start the p2p node
 		go func() {
@@ -637,6 +805,7 @@ func StartServer(nodeID, minerAddress string) {
 	 }else{
 	 	peers = nil
 	 }
+	 BootPeers = peers
 	 wallets1, err := core.NewWallets(nodeID)
 	 if err != nil {
 		 log.Panic(err)
@@ -659,16 +828,48 @@ func StartServer(nodeID, minerAddress string) {
 	 running := &p2p.Server{
 		 Config: config,
 	 }
-	 err = running.Start()
-	 if err != nil {
+
+	 /*
+	//if there are some exception quit during syncing block then remove version command from queue at the start
+	queueFile := fmt.Sprintf("version_%s.db", node_id)
+	versionPQueue, err := NewPQueue(queueFile)
+	if err != nil {
+		log.Panic("create queue error",err)
+	}
+	defer versionPQueue.Close()
+	defer os.Remove(queueFile)
+
+	size,_ := versionPQueue.Size(1)
+	fmt.Printf("version queue size %d\n", size)
+	if(size > 0){
+		versionPQueue.Dequeue()
+	}*/
+
+	err = running.Start()
+	if err != nil {
 		 panic("server start panic:" + err.Error())
-	 }
- fmt.Println("NodeInfo:", running.NodeInfo())
+	}
+	CurrentNodeInfo = running.NodeInfo()
+ 	fmt.Println("NodeInfo:", CurrentNodeInfo)
 
-	//bc := NewBlockchain(nodeID)
 
-	//if nodeAddress != KnownNodes[0] {
-	//	sendVersion(KnownNodes[0], bc)
+	//bc := core.NewBlockchain(nodeID)
+	//fmt.Println("af NewBlockchain:")
+	Manager = &ProtocolManager{
+		Peers:       newPeerSet(),
+		//blockchain:bc,
+		txMempool:make(map[string]*core.Transaction),
+		txsyncCh:    make(chan *txsync),
+		quitSync:    make(chan struct{}),
+	}
+	//defer bc.Db.Close()
+	//bc.Db.Close()
+	// start sync handlers
+	//go pm.syncer()
+	//go Manager.txsyncLoop()
+
+	//if nodeAddress != BootNodes[0] {
+	//	sendVersion(BootNodes[0], bc)
 	//}
 
 	select {}
@@ -719,12 +920,213 @@ func gobDecode(data []byte, to interface{}) error {
 
 
 func nodeIsKnown(addr string) bool {
-	for _, node := range KnownNodes {
+	for _, node := range BootNodes {
 		if node == addr {
 			return true
 		}
 	}
 
 	return false
+}
+
+
+// BroadcastTxs will propagate a batch of transactions to all peers which are not known to
+// already have the given transaction.
+func (pm *ProtocolManager) BroadcastTxs(txs core.Transactions) {
+	var txset = make(map[*Peer]core.Transactions)
+
+	// Broadcast transactions to a batch of peers not knowing about it
+	for _, tx := range txs {
+		peers := pm.Peers.PeersWithoutTx(tx.ID)
+		for _, peer := range peers {
+			txset[peer] = append(txset[peer], tx)
+		}
+		//log.Trace("Broadcast transaction", "hash", tx.Hash(), "recipients", len(peers))
+	}
+	// FIXME include this again: peers = peers[:int(math.Sqrt(float64(len(peers))))]
+	for peer, txs := range txset {
+		peer.AsyncSendTransactions(txs)
+	}
+}
+
+/*
+// BroadcastBlock will either propagate a block to a subset of it's peers, or
+// will only announce it's availability (depending what's requested).
+func (pm *ProtocolManager) BroadcastBlock(block *core.Block, propagate bool) {
+	hash := block.Hash
+	peers := pm.Peers.PeersWithoutBlock(hash)
+
+	// If propagation is requested, send to a subset of the peer
+	if propagate {
+		// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
+		var td *big.Int
+		if parent,err := pm.blockchain.GetBlock(block.PrevBlockHash); &parent != nil &&err == nil {
+			//td = new(big.Int).Add(block.Difficulty, pm.blockchain.GetTd(block.PrevBlockHash))
+			td = block.Height
+		} else {
+			log.Println("Propagating dangling block", "number", block.Height, "hash", hash)
+			return
+		}
+		// Send the block to a subset of our peers
+		transfer := peers[:int(math.Sqrt(float64(len(peers))))]
+		for _, peer := range transfer {
+			peer.AsyncSendNewBlock(block, td)
+		}
+		log.Println("Propagated block", "hash", hash, "recipients", len(transfer), "duration", common.PrettyDuration(time.Since(block.ReceivedAt)))
+		return
+	}
+	// Otherwise if the block is indeed in out own chain, announce it
+	//if pm.blockchain.HasBlock(hash, block.NumberU64()) {
+	//	for _, peer := range peers {
+	//		peer.AsyncSendNewBlockHash(block)
+	//	}
+	//	log.Trace("Announced block", "hash", hash, "recipients", len(peers), "duration", common.PrettyDuration(time.Since(block.ReceivedAt)))
+	//}
+}*/
+
+
+// syncTransactions starts sending all currently pending transactions to the given peer.
+func (pm *ProtocolManager) syncTransactions(p *Peer) {
+	var txs core.Transactions
+	pending := pm.txMempool
+	for _, batch := range pending {
+		txs = append(txs, batch)
+	}
+	if len(txs) == 0 {
+		return
+	}
+	select {
+	case pm.txsyncCh <- &txsync{p, txs}:
+	case <-pm.quitSync:
+	}
+}
+
+
+// txsyncLoop takes care of the initial transaction sync for each new
+// connection. When a new peer appears, we relay all currently pending
+// transactions. In order to minimise egress bandwidth usage, we send
+// the transactions in small packs to one peer at a time.
+func (pm *ProtocolManager) txsyncLoop() {
+	var (
+		pending = make(map[discover.NodeID]*txsync)
+		sending = false               // whether a send is active
+		pack    = new(txsync)         // the pack that is being sent
+		done    = make(chan error, 1) // result of the send
+	)
+
+	// send starts a sending a pack of transactions from the sync.
+	send := func(s *txsync) {
+		// Fill pack with transactions up to the target size.
+		size := common.StorageSize(0)
+		pack.p = s.p
+		pack.txs = pack.txs[:0]
+		for i := 0; i < len(s.txs) && size < txsyncPackSize; i++ {
+			pack.txs = append(pack.txs, s.txs[i])
+			size += s.txs[i].Size()
+		}
+		// Remove the transactions that will be sent.
+		s.txs = s.txs[:copy(s.txs, s.txs[len(pack.txs):])]
+		if len(s.txs) == 0 {
+			delete(pending, s.p.ID())
+		}
+		// Send the pack in the background.
+		s.p.Log().Trace("Sending batch of transactions", "count", len(pack.txs), "bytes", size)
+		sending = true
+		go func() { done <- pack.p.SendTransactions(pack.txs) }()
+	}
+
+	// pick chooses the next pending sync.
+	pick := func() *txsync {
+		if len(pending) == 0 {
+			return nil
+		}
+		n := rand.Intn(len(pending)) + 1
+		for _, s := range pending {
+			if n--; n == 0 {
+				return s
+			}
+		}
+		return nil
+	}
+
+	for {
+		select {
+		case s := <-pm.txsyncCh:
+			pending[s.p.ID()] = s
+			if !sending {
+				send(s)
+			}
+		case err := <-done:
+			sending = false
+			// Stop tracking peers that cause send failures.
+			if err != nil {
+				pack.p.Log().Debug("Transaction send failed", "err", err)
+				delete(pending, pack.p.ID())
+			}
+			// Schedule the next send.
+			if s := pick(); s != nil {
+				send(s)
+			}
+		case <-pm.quitSync:
+			return
+		}
+	}
+}
+
+
+func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
+	var buff bytes.Buffer
+	var payload verzion
+
+	//buff.Write(request[commandLength:])
+	buff.Write(command.Data)
+	dec := gob.NewDecoder(&buff)
+	err := dec.Decode(&payload)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	//save every version command received in queue
+	queueFile := fmt.Sprintf("version_%s.db", node_id)
+	versionPQueue, err := NewPQueue(queueFile)
+	if err != nil {
+		log.Panic("create Version Command queue error",err)
+	}
+
+	defer versionPQueue.Close()
+	defer os.Remove(queueFile)
+
+	// Dequeue history versiondata and sent version to the peer
+	//for size,err1 := versionPQueue.Size(1);err1 == nil && size > 0;{
+		versionMsg,err2:= versionPQueue.Dequeue()
+		if err2 != nil {
+			log.Panic("create Version myLastHash queue error",err)
+		}
+		myLastHash := versionMsg.Bytes()
+		//delete old conflict block
+		blockHashs := bc.GetBlockHashesMap(myLastHash)
+		blockHashs1 := bc.DelBlockHashes(blockHashs)
+		if(len(blockHashs1) == 0){
+			log.Panic("no blocks deleted !")
+		}
+		SendVersionStartConflict(p.Rw,myLastHash,bc)
+	//}
+
+}
+
+func enqueueVersion(myLastHash []byte){
+	//save every version command received in queue
+	queueFile := fmt.Sprintf("version_%s.db", node_id)
+	versionPQueue, err := NewPQueue(queueFile)
+	if err != nil {
+		log.Panic("create Version myLastHash queue error",err)
+	}
+
+	defer versionPQueue.Close()
+	defer os.Remove(queueFile)
+	eqerr := versionPQueue.Enqueue(1, NewMessageBytes(myLastHash))
+	if err != nil {
+		log.Panic("Version myLastHash Enqueue error",eqerr)
+	}
 }
 

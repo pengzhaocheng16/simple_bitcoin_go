@@ -278,7 +278,7 @@ func newMsgEventer(rw MsgReadWriter, feed *event.Feed, peerID discover.NodeID, p
 // "message received" event
 func (ev *msgEventer) ReadMsg() (Msg, error) {
 	msg, err := ev.MsgReadWriter.ReadMsg()
-	fmt.Println("-----(ev *msgEventer) ReadMsg():", msg.Payload)
+	fmt.Println("-----(ev *msgEventer) ReadMsg():", msg.Payload,"-",msg.String())
 	if err != nil {
 		return msg, err
 	}
@@ -297,6 +297,7 @@ func (ev *msgEventer) ReadMsg() (Msg, error) {
 // WriteMsg writes a message to the underlying MsgReadWriter and emits a
 // "message sent" event
 func (ev *msgEventer) WriteMsg(msg Msg) error {
+	fmt.Println("----->(ev *msgEventer) WriteMsg(msg Msg):", msg.Payload,"-",msg.String())
 	err := ev.MsgReadWriter.WriteMsg(msg)
 	if err != nil {
 		return err

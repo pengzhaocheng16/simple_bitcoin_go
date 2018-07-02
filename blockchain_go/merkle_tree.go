@@ -20,6 +20,7 @@ type MerkleNode struct {
 func NewMerkleTree(data [][]byte) *MerkleTree {
 	var nodes []MerkleNode
 
+	//fmt.Println("---@@data %d...",len(data))
 	if len(data)%2 != 0 {
 		data = append(data, data[len(data)-1])
 	}
@@ -28,6 +29,8 @@ func NewMerkleTree(data [][]byte) *MerkleTree {
 		node := NewMerkleNode(nil, nil, datum)
 		nodes = append(nodes, *node)
 	}
+
+	//fmt.Println("---@@nodes %d...",len(nodes))
 
 	for i := 0; i < len(data)/2; i++ {
 		var newLevel []MerkleNode

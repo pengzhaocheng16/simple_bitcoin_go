@@ -38,7 +38,7 @@ const (
 	// once every few seconds.
 	lookupInterval = 4 * time.Second
 
-	// If no peers are found for this amount of time, the initial bootnodes are
+	// If no peers are found for this amount of time, the initial BootNodes are
 	// attempted to be connected.
 	fallbackInterval = 20 * time.Second
 
@@ -81,7 +81,7 @@ type dialstate struct {
 	hist          *dialHistory
 
 	start     time.Time        // time when the dialer was first used
-	bootnodes []*discover.Node // default dials when there are no peers
+	BootNodes []*discover.Node // default dials when there are no peers
 }
 
 type discoverTable interface {
@@ -127,18 +127,18 @@ type waitExpireTask struct {
 	time.Duration
 }
 
-func newDialState(static []*discover.Node, bootnodes []*discover.Node, ntab discoverTable, maxdyn int, netrestrict *netutil.Netlist) *dialstate {
+func newDialState(static []*discover.Node, BootNodes []*discover.Node, ntab discoverTable, maxdyn int, netrestrict *netutil.Netlist) *dialstate {
 	s := &dialstate{
 		maxDynDials: maxdyn,
 		ntab:        ntab,
 		netrestrict: netrestrict,
 		static:      make(map[discover.NodeID]*dialTask),
 		dialing:     make(map[discover.NodeID]connFlag),
-		bootnodes:   make([]*discover.Node, len(bootnodes)),
+		BootNodes:   make([]*discover.Node, len(BootNodes)),
 		randomNodes: make([]*discover.Node, maxdyn/2),
 		hist:        new(dialHistory),
 	}
-	copy(s.bootnodes, bootnodes)
+	copy(s.BootNodes, BootNodes)
 	for _, n := range static {
 		s.addStatic(n)
 	}
@@ -206,10 +206,10 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 	// If we don't have any peers whatsoever, try to dial a random bootnode. This
 	// scenario is useful for the testnet (and private networks) where the discovery
 	// table might be full of mostly bad peers, making it hard to find good ones.
-	if len(peers) == 0 && len(s.bootnodes) > 0 && needDynDials > 0 && now.Sub(s.start) > fallbackInterval {
-		bootnode := s.bootnodes[0]
-		s.bootnodes = append(s.bootnodes[:0], s.bootnodes[1:]...)
-		s.bootnodes = append(s.bootnodes, bootnode)
+	if len(peers) == 0 && len(s.BootNodes) > 0 && needDynDials > 0 && now.Sub(s.start) > fallbackInterval {
+		bootnode := s.BootNodes[0]
+		s.BootNodes = append(s.BootNodes[:0], s.BootNodes[1:]...)
+		s.BootNodes = append(s.BootNodes, bootnode)
 
 		if addDial(dynDialedConn, bootnode) {
 			needDynDials--

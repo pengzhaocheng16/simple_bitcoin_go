@@ -457,7 +457,7 @@ func (srv *Server) Start() (err error) {
 			AnnounceAddr: realaddr,
 			NodeDBPath:   srv.NodeDatabase,
 			NetRestrict:  srv.NetRestrict,
-			Bootnodes:    srv.BootstrapNodes,
+			BootNodes:    srv.BootstrapNodes,
 			Unhandled:    unhandled,
 		}
 		ntab, err := discover.ListenUDP(conn, cfg)
