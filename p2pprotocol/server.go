@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"os"
 	."../boltqueue"
+	"gopkg.in/fatih/set.v0"
 )
 
 const protocol = "tcp"
@@ -35,6 +36,7 @@ var BootNodes = []string{"192.168.1.196:2000"}
 var BootPeers = []*discover.Node{}
 var CurrentNodeInfo *p2p.NodeInfo
 var blocksInTransit = [][]byte{}
+var blocksInTransitSet = set.New()
 
 var send = make(chan interface{}, 1)
 
@@ -355,12 +357,12 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 	if( valid ){
 		if(!p.knownBlocks.Has(hex.EncodeToString(block.Hash))){
 			bc.AddBlock(block)
+			p.lock.RLock()
+			//Manager.CurrTd = block.Height
+			p.knownBlocks.Add(hex.EncodeToString(block.Hash))
+			//defer p.lock.RUnlock()
+			p.lock.RUnlock()
 		}
-		p.lock.RLock()
-		//Manager.CurrTd = block.Height
-		p.knownBlocks.Add(hex.EncodeToString(block.Hash))
-		//defer p.lock.RUnlock()
-		p.lock.RUnlock()
 
 		time := time.Now()
 		block.ReceivedAt = time
@@ -384,7 +386,11 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 	if len(blocksInTransit) > 0 {
 		blockHash := blocksInTransit[len(blocksInTransit)-1]
 		//sendGetData(payload.AddrFrom, "block", blockHash)
-		sendGetData(p.Rw, "block", blockHash)
+		blockHashStr := hex.EncodeToString(blockHash)
+		if(blocksInTransitSet.Has(blockHashStr)){
+			sendGetData(p.Rw, "block", blockHash)
+			blocksInTransitSet.Remove(hex.EncodeToString(block.Hash))
+		}
 		if(len(blocksInTransit) > 1){
 			blocksInTransit = blocksInTransit[:len(blocksInTransit)-1]
 		}else{
@@ -431,10 +437,17 @@ func handleInv(p *Peer,command Command, bc *core.Blockchain) {
 
 	if payload.Type == "block" {
 		blocksInTransit = payload.Items
-
+		for _,item := range payload.Items {
+			blocksInTransitSet.Add(hex.EncodeToString(item))
+		}
 		blockHash := payload.Items[len(blocksInTransit)-1]
+		blockHashStr := hex.EncodeToString(blockHash)
 		//sendGetData(payload.AddrFrom, "block", blockHash)
-		sendGetData(p.Rw, "block", blockHash)
+
+		if blocksInTransitSet.Has(blockHashStr) {
+			sendGetData(p.Rw, "block", blockHash)
+			blocksInTransitSet.Remove(blockHashStr)
+		}
 		fmt.Printf("==========>request payload.Items[0]-blockhash %x %s\n", blockHash, payload.Type)
 		newInTransit := [][]byte{}
 		for _, b := range blocksInTransit {
@@ -578,6 +591,7 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 			select{
 			case ch := <- Manager.BestTd:
 				td,_ := bc.GetBestHeight()
+				log.Println("---td 1:",td)
 				if(td.Cmp(ch) == 0){
 					log.Println("---td:",ch)
 					break
