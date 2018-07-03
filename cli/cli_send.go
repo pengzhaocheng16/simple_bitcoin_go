@@ -3,10 +3,10 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
-	."../boltqueue"
 	"../blockchain_go"
 	"../p2pprotocol"
+	"time"
+	"encoding/hex"
 )
 
 func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
@@ -20,10 +20,13 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 	if from == to {
 		log.Panic("ERROR: Wallet from equal Wallet to is not valid")
 	}
+	log.Println("--start cli send ")
 
-	bc := core.NewBlockchain(nodeID)
+	var bc *core.Blockchain
+	bc = core.NewBlockchain(nodeID)
+
 	UTXOSet := core.UTXOSet{bc}
-	//defer bc.db.Close()
+	//defer bc.Db.Close()
 
 	wallets, err := core.NewWallets(nodeID)
 	if err != nil {
@@ -32,21 +35,7 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 	wallet := wallets.GetWallet(from)
 
 	tx := core.NewUTXOTransaction(&wallet, to, amount, &UTXOSet)
-	//TODO remove comfirmed transaction from persistent queue
-	//In case of double spend check fail need to store prev uncomfirmed transaction input tx
-	if(!mineNow){
-		queueFile := fmt.Sprintf("%x_tx.db", wallet.GetAddress())
-		txPQueue, err := NewPQueue(queueFile)
-		if err != nil {
-			log.Panic("create queue error",err)
-		}
-		defer txPQueue.Close()
-		defer os.Remove(queueFile)
-		eqerr := txPQueue.Enqueue(1, NewMessageBytes(tx.Vin[0].Txid))
-		if err != nil {
-			log.Panic("Enqueue error",eqerr)
-		}
-	}
+
 
 	if mineNow {
 		cbTx := core.NewCoinbaseTX(from, "")
@@ -54,19 +43,77 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 
 		newBlock := bc.MineBlock(txs)
 		UTXOSet.Update(newBlock)
+		bc.Db.Close()
 	} else {
-		//p2pprotocol.SendTx(core.KnownNodes[0], tx)
-		i := 1
-		var p *p2pprotocol.Peer
-		for _, v := range p2pprotocol.Peers {
-			if(i<2){
-				p = v
-				break
+		bc.Db.Close()
+		//TODO remove comfirmed transaction from persistent tx queue
+		//In case of double spend check fail need to store prev uncomfirmed transaction input tx
+		core.PendingIn(wallet,tx)
+		go func(){
+			if(p2pprotocol.CurrentNodeInfo == nil){
+				p2pprotocol.StartServer(nodeID,"")
 			}
-			i = i+1
+		}()
+		time.Sleep(2*time.Second)
+		select{
+			case ch := <- p2pprotocol.Manager.BestTd:
+
+				bc1 := core.NewBlockchain(nodeID)
+				td,_ := bc1.GetBestHeight()
+				bc1.Db.Close()
+				if(td.Cmp(ch) == 0){
+					log.Println("---td:",ch)
+					break
+				}
 		}
-		p2pprotocol.SendTx(p.Rw, tx)
+		//p2pprotocol.SendTx(core.BootNodes[0], tx)
+		//go func(){
+			for _, p := range p2pprotocol.Manager.Peers.Peers {
+				p2pprotocol.SendTx(p, p.Rw, tx)
+			}
+			p2pprotocol.Manager.TxMempool[hex.EncodeToString(tx.ID)] = tx
+		//}()
+		//select{}
+		for{
+			var send,from,fromaddress,to,toaddress,amount string
+			var amountnum int
+			fmt.Scanf("%s %s %s %s %s %s %d", &send,&from,&fromaddress,&to,&toaddress,&amount,&amountnum)
+
+			log.Println("--send ",send)
+			if(send == ""||send != "send"){
+				log.Panic("need send command")
+			}
+			if(from == ""||from != "-from"){
+				log.Panic("need from command")
+			}
+			if(fromaddress == ""){
+				log.Panic("need fromaddress param")
+			}
+			if(to == ""||to != "-to"){
+				log.Panic("need to command")
+			}
+			if(toaddress == ""){
+				log.Panic("need toaddress param")
+			}
+			if(amount == ""||amount != "-amount"){
+				log.Panic("need amount command")
+			}
+			if(amountnum == 0){
+				log.Panic("need amount  param")
+			}
+
+			bc = core.NewBlockchain(nodeID)
+			UTXOSet := core.UTXOSet{bc}
+			log.Println("--send to",toaddress)
+			tx := core.NewUTXOTransaction(&wallet, toaddress, amountnum, &UTXOSet)
+			for _, p := range p2pprotocol.Manager.Peers.Peers {
+				p2pprotocol.SendTx(p, p.Rw, tx)
+			}
+			p2pprotocol.Manager.TxMempool[hex.EncodeToString(tx.ID)] = tx
+			bc.Db.Close()
+			//cli.send(fromaddress,toaddress,amountnum,nodeID,false)
+		}
 	}
 
-	fmt.Println("Success!")
+	//fmt.Println("Success!")
 }
