@@ -7,10 +7,10 @@ import (
 	"github.com/boltdb/bolt"
 	"math"
 	"fmt"
-	"os"
 	."../boltqueue"
 	"bytes"
 	"math/big"
+	"os"
 )
 
 const utxoBucket = "chainstate"
@@ -26,22 +26,24 @@ type UTXOSet struct {
 func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount int,minerCheck bool,spendTxid []byte) (int, map[string][]int) {
 	unspentOutputs := make(map[string][]int)
 	accumulated := 0
-	db := u.Blockchain.Db
 
+	log.Println("--start  FindSpendableOutputs ")
 	queueFile := fmt.Sprintf("%x_tx.db", GetAddressFromPubkeyHash(pubkeyHash))
 	txPQueue, errcq := NewPQueue(queueFile)
+	//defer txPQueue.Close()
+	defer os.Remove(queueFile)
+
 	if errcq != nil {
 		log.Panic("create queue error",errcq)
 	}
-	defer txPQueue.Close()
-	defer os.Remove(queueFile)
 	qsize, errqs := txPQueue.Size(1)
 	if (errqs != nil) {
 		fmt.Printf("get pending tx queue size error %s \n", errqs)
 	}
 	fmt.Printf("pending tx queue size %d \n", qsize)
 
-	err := db.View(func(tx *bolt.Tx) error {
+	log.Println("--start  FindSpendableOutputs  u.Blockchain.Db View")
+	err := u.Blockchain.Db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(utxoBucket))
 		c := b.Cursor()
 
@@ -70,6 +72,8 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount int,minerCheck b
 
 		return nil
 	})
+	txPQueue.Close()
+	log.Println("--after  FindSpendableOutputs ")
 	if err != nil {
 		log.Panic(err)
 	}

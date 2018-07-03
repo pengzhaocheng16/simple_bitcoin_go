@@ -7,17 +7,17 @@ import (
 	"crypto/sha256"
 	"math/big"
 	"strings"
-	"io"
-
 	"encoding/gob"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"time"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/common"
 	"sync/atomic"
+	"github.com/ethereum/go-ethereum/rlp"
+	"os"
+	."../boltqueue"
 )
 
 const subsidy = 50
@@ -139,8 +139,9 @@ func (tx *Transaction) TrimmedCopy() Transaction {
 	}
 
 	var v = atomic.Value{}
-	v.Store(0)
-	txCopy := Transaction{tx.ID, inputs, outputs,tx.Timestamp,v}
+	v.Store(common.StorageSize(0))
+	txCopy := Transaction{tx.ID, inputs, outputs,tx.Timestamp,tx.size}
+	tx.SetSize(uint64(len(tx.Serialize())))
 	//txCopy.size.Store(tx.Size())
 
 	return txCopy
@@ -205,9 +206,10 @@ func NewCoinbaseTX(to, data string) *Transaction {
 	txin := TXInput{[]byte{}, -1, nil, []byte(data)}
 	txout := NewTXOutput(subsidy, to)
 	var v = atomic.Value{}
-	v.Store(0)
+	v.Store(common.StorageSize(0))
 	tx := Transaction{nil, []TXInput{txin}, []TXOutput{*txout}, time.Now().Unix(),v}
 	tx.ID = tx.Hash()
+	tx.SetSize(uint64(len(tx.Serialize())))
 
 	return &tx
 }
@@ -244,9 +246,10 @@ func NewUTXOTransaction(wallet *Wallet, to string, amount int, UTXOSet *UTXOSet)
 	}
 
 	var v = atomic.Value{}
-	v.Store(0)
+	v.Store(common.StorageSize(0))
 	tx := Transaction{nil, inputs, outputs, time.Now().Unix(),v}
 	tx.ID = tx.Hash()
+	tx.SetSize(uint64(len(tx.Serialize())))
 	UTXOSet.Blockchain.SignTransaction(&tx, wallet.PrivateKey)
 
 	return &tx
@@ -280,7 +283,7 @@ func VeryfyFromToAddress(tx *Transaction) bool{
 	return true
 }
 
-
+/*
 // EncodeRLP implements rlp.Encoder
 func (tx *Transaction) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, &tx)
@@ -296,16 +299,68 @@ func (tx *Transaction) DecodeRLP(s *rlp.Stream) error {
 
 	return err
 }
-
+*/
 
 // Size returns the true RLP encoded storage size of the transaction, either by
 // encoding and returning it, or returning a previsouly cached value.
 func (tx *Transaction) Size() common.StorageSize {
-	if size := tx.size.Load(); size != nil {
+	if size := tx.size.Load(); size != nil && size != common.StorageSize(0) {
 		return size.(common.StorageSize)
 	}
 	c := writeCounter(0)
 	rlp.Encode(&c, &tx)
 	tx.size.Store(common.StorageSize(c))
 	return common.StorageSize(c)
+}
+
+func (tx *Transaction) SetSize(c uint64) common.StorageSize {
+	tx.size.Store(common.StorageSize(c))
+	return  common.StorageSize(c)
+}
+
+func PendingIn(wallet Wallet,tx *Transaction){
+	queueFile := fmt.Sprintf("%x_tx.db", wallet.GetAddress())
+	txPQueue, err := NewPQueue(queueFile)
+	if err != nil {
+		log.Panic("create queue error",err)
+	}
+	//defer txPQueue.Close()
+	defer os.Remove(queueFile)
+	eqerr := txPQueue.Enqueue(1, NewMessageBytes(tx.Vin[0].Txid))
+	if err != nil {
+		log.Panic("Enqueue error",eqerr)
+	}
+	txPQueue.Close()
+}
+
+func VerifyTx(tx Transaction,bc *Blockchain)bool{
+	if &tx == nil {
+		fmt.Println("transaction %x is nil:",&tx.ID)
+		return false
+	}
+	// ignore transaction if it's not valid
+	// 1 have received longest chain among knownodes(full nodes)
+	// 2 transaction have valid sign accounding to owner's pubkey by VerifyTransaction()
+	// 3 utxo amount >= transaction output amount
+	// 4 transaction from address not equal to address
+	var valid1 = true
+	var valid2 = true
+	var valid3 = true
+	if !bc.VerifyTransaction(&tx) {
+		//log.Panic("ERROR: Invalid transaction:sign")
+		valid1 = false
+	}
+	UTXOSet := UTXOSet{bc}
+	if(tx.IsCoinbase()==false&&!UTXOSet.IsUTXOAmountValid(&tx)){
+		//log.Panic("ERROR: Invalid transaction:amount")
+		valid2 = false
+	}
+	valid3 = VeryfyFromToAddress(&tx)
+	fmt.Printf("valid3  %s\n", valid3)
+
+	if(valid1 && valid2 && valid3){
+		return true
+	}else{
+		return false
+	}
 }

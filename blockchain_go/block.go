@@ -190,3 +190,17 @@ func calcDifficultyHomestead(time uint64, parent *Block) *big.Int {
 	return x
 }
 
+
+// HashTransactions returns a hash of the transactions in the block
+func (b *Block) HasTransactions(TxId []byte) bool{
+
+	for _, tx := range b.Transactions {
+		//transactions = append(transactions, tx.Serialize())
+		//transactions = append(transactions, tx.Hash())
+		if(bytes.Equal(tx.ID,TxId)){
+			return true
+		}
+	}
+
+	return false
+}

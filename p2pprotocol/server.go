@@ -262,6 +262,8 @@ func sendGetData(addr p2p.MsgWriter, kind string, id []byte) {
 }
 
 func SendTx(p *Peer,addr p2p.MsgWriter, tnx *core.Transaction) {
+	fmt.Printf("tnx.Size()  %s\n", tnx.Size())
+
 	data := tx{nodeAddress, tnx.Serialize()}
 	payload := gobEncode(data)
 	//request := append(commandToBytes("tx"), payload...)
@@ -281,6 +283,7 @@ func SendVersion(addr p2p.MsgWriter, bc *core.Blockchain) {
 	payload := gobEncode(verzion{nodeVersion, bestHeight,lastHash, nodeAddress})
 	//request := append(commandToBytes("version"), payload...)
 
+	Manager.BigestTd = bestHeight
 
 	command := Command{
 		Command:"version",
@@ -349,13 +352,27 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 	fmt.Println("Recevied new Block hash %x \n", block.Hash)
 
 	valid,reason := bc.IsBlockValid(block)
-	if(valid){
-		bc.AddBlock(block)
-		Manager.CurrTd = block.Height
+	if( valid ){
+		if(!p.knownBlocks.Has(hex.EncodeToString(block.Hash))){
+			bc.AddBlock(block)
+		}
+		p.lock.RLock()
+		//Manager.CurrTd = block.Height
 		p.knownBlocks.Add(hex.EncodeToString(block.Hash))
+		//defer p.lock.RUnlock()
+		p.lock.RUnlock()
 
 		time := time.Now()
 		block.ReceivedAt = time
+
+		pending := Manager.TxMempool
+		//fmt.Println("---len(pending) ",len(pending))
+		for _, tx := range pending {
+			//fmt.Println("---syncTransactions ")
+			if(block.HasTransactions(tx.ID)){
+				delete(Manager.TxMempool, hex.EncodeToString(tx.ID))
+			}
+		}
 		//Manager.BroadcastBlock(block,true)
 	}else{
 		fmt.Printf("Block not Valid reason %d  %x\n",reason,block.Hash)
@@ -429,12 +446,15 @@ func handleInv(p *Peer,command Command, bc *core.Blockchain) {
 	}
 
 	if payload.Type == "tx" {
-		txID := payload.Items[0]
-
-		if Manager.txMempool[hex.EncodeToString(txID)].ID == nil {
-			//sendGetData(payload.AddrFrom, "tx", txID)
-			sendGetData(p.Rw, "tx", txID)
+		var txID []byte
+		for _,Item := range payload.Items{
+			txID = Item
+			if !p.knownTxs.Has(hex.EncodeToString(txID)) {
+				//sendGetData(payload.AddrFrom, "tx", txID)
+				sendGetData(p.Rw, "tx", txID)
+			}
 		}
+
 	}
 }
 
@@ -501,12 +521,14 @@ func handleGetData(p *Peer,command Command, bc *core.Blockchain) {
 
 	if payload.Type == "tx" {
 		txID := hex.EncodeToString(payload.ID)
-		tx := Manager.txMempool[txID]
+		tx := Manager.TxMempool[txID]
 
-		//SendTx(payload.AddrFrom, &tx)
-		SendTx(p, p.Rw, tx)
-		//TODO delete from queue after user new transaction been comfirmed
-		// delete(queue, txID)
+		if(tx!=nil){
+			//SendTx(payload.AddrFrom, &tx)
+			SendTx(p, p.Rw, tx)
+			//TODO delete from queue after user new transaction been comfirmed
+			// delete(queue, txID)
+		}
 	}
 }
 
@@ -524,18 +546,19 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 
 	txData := payload.Transaction
 	tx := core.DeserializeTransaction(txData)
-	Manager.txMempool[hex.EncodeToString(tx.ID)] = &tx
+	tx.SetSize(uint64(len(txData)))
 
-	//broadcast new pending tx
-	if len(Manager.txMempool) >= 2{
-		p.MarkTransaction(tx.ID)
-		var txs core.Transactions
-		for id := range Manager.txMempool {
-			tx := Manager.txMempool[id]
-			txs = append(txs, tx)
-		}
-		Manager.BroadcastTxs(txs)
-	}
+	//tx.Size()
+
+	Manager.TxMempool[hex.EncodeToString(tx.ID)] = &tx
+
+
+	p.MarkTransaction(tx.ID)
+
+	var tnxs core.Transactions
+	tnxs = append(tnxs, &tx)
+	Manager.BroadcastTxs(tnxs)
+
 	if nodeAddress == BootNodes[0] {
 		/*for _, node := range BootNodes {
 			if node != nodeAddress && node != payload.AddFrom {
@@ -545,50 +568,31 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 		}*/
 		//sendInv(p.Rw, "tx", [][]byte{tx.ID})
 	} else {
-		if len(Manager.txMempool) >= 2 && len(miningAddress) > 0 {
+		fmt.Println("==>len tx")
+		if len(Manager.TxMempool) >= 2 && len(miningAddress) > 0 {
 		MineTransactions:
 			var txs []*core.Transaction
+
+			fmt.Println("==>Loopsync")
 			//wait block sync complete
-		Loopsync:
-			for{
+			select{
+			case ch := <- Manager.BestTd:
 				td,_ := bc.GetBestHeight()
-				//if(Manager.Peers.BestPeer().td != td){
-				if(Manager.BigestTd != td){//Manager.CurrTd
-						time.Sleep(1*time.Millisecond)
-				}else{
-					break Loopsync
+				if(td.Cmp(ch) == 0){
+					log.Println("---td:",ch)
+					break
 				}
 			}
 
-			for id := range Manager.txMempool {
-				tx := Manager.txMempool[id]
-				if tx == nil {
-					fmt.Println("transaction %x is nil:",id)
-					continue
+			fmt.Println("==>VerifyTx ")
+			for id := range Manager.TxMempool {
+				//verify transaction
+				if(core.VerifyTx(tx,bc)) {
+					txs = append(txs, Manager.TxMempool[id])
 				}
-				// ignore transaction if it's not valid
-				// 1 have received longest chain among knownodes(full nodes)
-				// 2 transaction have valid sign accounding to owner's pubkey by VerifyTransaction()
-				// 3 utxo amount >= transaction output amount
-				// 4 transaction from address not equal to address
-				var valid1 = true
-				var valid2 = true
-				var valid3 = true
-				if !bc.VerifyTransaction(tx) {
-					log.Panic("ERROR: Invalid transaction:sign")
-					valid1 = false
-				}
-				UTXOSet := core.UTXOSet{bc}
-				if(tx.IsCoinbase()==false&&!UTXOSet.IsUTXOAmountValid(tx)){
-					log.Panic("ERROR: Invalid transaction:amount")
-					valid2 = false
-				}
-				valid3 = core.VeryfyFromToAddress(tx)
-				if(valid1 && valid2 && valid3){
-					txs = append(txs, tx)
-				}
-				fmt.Printf("valid3  %s\n", valid3)
-
+			}
+			if len(txs) < 2 && len(miningAddress) > 0 {
+				return
 			}
 
 			if len(txs) == 0 {
@@ -596,6 +600,7 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 				return
 			}
 
+			fmt.Println("==>NewCoinbaseTX ")
 			cbTx := core.NewCoinbaseTX(miningAddress, "")
 			txs = append(txs, cbTx)
 
@@ -619,10 +624,11 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 			}
 			for _, tx := range txs {
 				txID := hex.EncodeToString(tx.ID)
-				delete(Manager.txMempool, txID)
+				delete(Manager.TxMempool, txID)
 			}
 
-			if len(Manager.txMempool) > 0 {
+			fmt.Println("==>after mine len(Manager.TxMempool) ",len(Manager.TxMempool))
+			if len(Manager.TxMempool) > 0 {
 				goto MineTransactions
 			}
 		}
@@ -646,15 +652,20 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 	myLastHashStr := hex.EncodeToString(myLastHash)
 	foreignerBestHeight := payload.BestHeight
 
-	p.td = foreignerBestHeight
+	p.Td = foreignerBestHeight
 
 	if myBestHeight.Cmp(foreignerBestHeight) <= 0 {
 		//sendGetBlocks(payload.AddrFrom,myLastHash)
-		if(myBestHeight.Cmp(foreignerBestHeight) < 0&&Manager.Peers.BestPeer().td == foreignerBestHeight){
-			Manager.BigestTd = foreignerBestHeight
+		if(myBestHeight.Cmp(foreignerBestHeight) < 0){
 			enqueueVersion(myLastHash)
 			sendGetBlocks(p.Rw,myLastHashStr)
 		}
+		go func() {
+			select {
+			case Manager.BestTd <- foreignerBestHeight:
+				fmt.Println("---Manager.BestTd:", &Manager.BestTd)
+			}
+		}()
 	} else if myBestHeight.Cmp(foreignerBestHeight) > 0 {
 		//sendVersion(payload.AddrFrom, bc)
 		//SendVersion(p.Rw, bc)
@@ -679,6 +690,12 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 			p2p.Send(p.Rw, StatusMsg, &Command{"conflict",payload})
 			return
 		}
+		go func(){
+		select {
+		case Manager.BestTd <- myBestHeight:
+			fmt.Println("---Manager.BestTd:", &Manager.BestTd)
+		}
+		}()
 	}
 
 	if( p.forkDrop != nil){
@@ -773,7 +790,7 @@ func StartServer(nodeID, minerAddress string) {
 	}
 	defer ln.Close()
 	*/
-/*
+	/*
 	recv := make(chan interface{}, 1)
 	var laddr = nodeAddress
 	var saddr = BootNodes[0]
@@ -811,8 +828,8 @@ func StartServer(nodeID, minerAddress string) {
 		 log.Panic(err)
 	 }
 	 //wallet1 := wallets1.GetWallet("1NWUWL17WtxzSMVWhGm8UD7Y45ikFUHZCx")
-	walletaddrs1 := wallets1.GetAddresses()
-	wallet1 := wallets1.GetWallet(walletaddrs1[0])
+	 walletaddrs1 := wallets1.GetAddresses()
+	 wallet1 := wallets1.GetWallet(walletaddrs1[0])
 	 config := p2p.Config{
 		 PrivateKey:      &wallet1.PrivateKey,
 		 MaxPeers:        10,
@@ -855,18 +872,21 @@ func StartServer(nodeID, minerAddress string) {
 
 	//bc := core.NewBlockchain(nodeID)
 	//fmt.Println("af NewBlockchain:")
+	//td,_:= bc.GetBestHeight()
+	//bc.Db.Close()
 	Manager = &ProtocolManager{
 		Peers:       newPeerSet(),
-		//blockchain:bc,
-		txMempool:make(map[string]*core.Transaction),
-		txsyncCh:    make(chan *txsync),
-		quitSync:    make(chan struct{}),
+		//Bc:bc,
+		TxMempool:make(map[string]*core.Transaction),
+		txsyncCh: make(chan *txsync),
+		quitSync: make(chan struct{}),
+		//BigestTd:td,
+		BestTd: make(chan *big.Int),
 	}
 	//defer bc.Db.Close()
-	//bc.Db.Close()
 	// start sync handlers
-	//go pm.syncer()
-	//go Manager.txsyncLoop()
+	////go pm.syncer()
+	go Manager.txsyncLoop()
 
 	//if nodeAddress != BootNodes[0] {
 	//	sendVersion(BootNodes[0], bc)
@@ -938,6 +958,7 @@ func (pm *ProtocolManager) BroadcastTxs(txs core.Transactions) {
 	// Broadcast transactions to a batch of peers not knowing about it
 	for _, tx := range txs {
 		peers := pm.Peers.PeersWithoutTx(tx.ID)
+		log.Println("---len(PeersWithoutTx)   ",len(peers))
 		for _, peer := range peers {
 			txset[peer] = append(txset[peer], tx)
 		}
@@ -988,8 +1009,11 @@ func (pm *ProtocolManager) BroadcastBlock(block *core.Block, propagate bool) {
 // syncTransactions starts sending all currently pending transactions to the given peer.
 func (pm *ProtocolManager) syncTransactions(p *Peer) {
 	var txs core.Transactions
-	pending := pm.txMempool
+
+	pending := pm.TxMempool
+	//fmt.Println("---len(pending) ",len(pending))
 	for _, batch := range pending {
+		//fmt.Println("---syncTransactions ")
 		txs = append(txs, batch)
 	}
 	if len(txs) == 0 {
@@ -1030,6 +1054,7 @@ func (pm *ProtocolManager) txsyncLoop() {
 			delete(pending, s.p.ID())
 		}
 		// Send the pack in the background.
+		fmt.Println("---txsyncLoop len(pack.txs) ",len(pack.txs),"--",size)
 		s.p.Log().Trace("Sending batch of transactions", "count", len(pack.txs), "bytes", size)
 		sending = true
 		go func() { done <- pack.p.SendTransactions(pack.txs) }()
@@ -1052,6 +1077,7 @@ func (pm *ProtocolManager) txsyncLoop() {
 	for {
 		select {
 		case s := <-pm.txsyncCh:
+			fmt.Println("---txsyncLoop ")
 			pending[s.p.ID()] = s
 			if !sending {
 				send(s)
