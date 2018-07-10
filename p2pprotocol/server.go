@@ -7,9 +7,8 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"../dotray"
+	//"../dotray"
 	"time"
-	"io"
 	//"github.com/ethereum/go-ethereum/p2p"
 	"../p2p"
 	"../p2p/discover"
@@ -100,6 +99,7 @@ func commandToBytes(command string) []byte {
 	return bytes[:]
 }
 
+
 func bytesToCommand(bytes []byte) string {
 	var command []byte
 
@@ -150,7 +150,7 @@ func sendBlock(addr p2p.MsgWriter, b *core.Block) error{
 
 	return sendDataC(addr, command)
 }
-
+/*
 func sendData(addr string, data []byte) {
 	isbroadcast := 1
 	command := bytesToCommand(data[:commandLength])
@@ -219,7 +219,7 @@ func sendData(addr string, data []byte) {
 			log.Panic(err)
 		}
 	}
-}
+}*/
 
 func sendDataC(w p2p.MsgWriter, data Command) error{
 	err := p2p.Send(w, StatusMsg, &data)
@@ -1170,3 +1170,71 @@ func enqueueVersion(myLastHash []byte){
 	}
 }
 
+func confirmTx(newblock core.Block,wallet core.Wallet) bool {
+	queueFile := fmt.Sprintf("%x_tx.db", wallet.GetAddress())
+	txPQueue, err := NewPQueue(queueFile)
+	if err != nil {
+		log.Panic("create queue error", err)
+	}
+	defer txPQueue.Close()
+	defer os.Remove(queueFile)
+	// priority 1 msg: spent utxo transaction id
+	// priority 2 msg: comfirmation counter + tx block hash +  user's pending transaction id
+	//loop block's txs if block's tx exist in queue then tx's confirmationCount +1
+	//if confirmationCount == 6 remove priority 2 tx data:tx id and 1 tx data:tx's vin txid
+	var txid *Message
+	var counter []byte
+	var iddata []byte
+	for _, tx := range newblock.Transactions {
+		txid = txPQueue.GetMsg(2, tx.ID, 193)
+
+		if (txid != nil) {
+			counter = txid.Bytes()[:1]
+			iddata = txid.Bytes()[1:]
+		}
+	}
+	var txidold []byte
+	vall := txPQueue.GetAll(2)
+	for _, txiddata0 := range vall {
+		txiddata := txiddata0[1:193]
+
+		hash1 := hex.EncodeToString(txiddata[:32])
+		hash2 := hex.EncodeToString(txiddata[32:64])
+		hash3 := hex.EncodeToString(txiddata[64:96])
+		hash4 := hex.EncodeToString(txiddata[96:128])
+		hash5 := hex.EncodeToString(txiddata[128:160])
+		hash6 := hex.EncodeToString(txiddata[160:192])
+		switch hex.EncodeToString(newblock.PrevBlockHash) {
+		case hash1:
+		case hash2:
+		case hash3:
+		case hash4:
+		case hash5:
+		case hash6:
+			txidold = txiddata0[193:]
+			break
+
+		}
+		if (txidold != nil) {
+			counter = txiddata0[:1]
+			iddata = txidold
+		}
+	}
+
+	if (txid != nil||txidold!=nil) {
+		// counter + 1 1 byte
+		counter[0] = counter[0] + 1
+		// confirmation’s block hash 32 * 6 =192 bytes
+		var blockHash= []byte{}
+		blockHash = append(blockHash, newblock.Hash...)
+
+		newtxid := append(counter, blockHash...)
+		newtxid = append(counter, iddata...)
+		if (counter[0] == 6) {
+			txPQueue.DeleteMsg(2, newtxid, 193)
+		} else {
+			txPQueue.SetMsg(2, newtxid, 193)
+		}
+	}
+	return false
+}
