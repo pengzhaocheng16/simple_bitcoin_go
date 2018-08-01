@@ -20,6 +20,11 @@ import (
 	"os"
 	."../boltqueue"
 	"gopkg.in/fatih/set.v0"
+	"os/signal"
+	"syscall"
+	"../node"
+	//"github.com/ethereum/go-ethereum/internal/debug"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 const protocol = "tcp"
@@ -31,7 +36,7 @@ const txsyncPackSize = 100 * 1024
 
 var nodeAddress string
 var miningAddress string
-var BootNodes = []string{"192.168.1.196:2000"}
+var BootNodes = []string{"192.168.1.101:2000"}
 var BootPeers = []*discover.Node{}
 var CurrentNodeInfo *p2p.NodeInfo
 var blocksInTransit = [][]byte{}
@@ -41,6 +46,10 @@ var send = make(chan interface{}, 1)
 
 var node_id string
 var Manager *ProtocolManager
+
+var (
+	testNodeKey, _ = crypto.GenerateKey()
+)
 
 type Node struct {
 	AddrList []string
@@ -400,20 +409,6 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 		//UTXOSet := UTXOSet{bc}
 		//UTXOSet.Reindex()
 
-		//after version command finished remove version command from queue
-		/*queueFile := fmt.Sprintf("version_%s.db", node_id)
-		versionPQueue, err := NewPQueue(queueFile)
-		if err != nil {
-			log.Panic("create queue error",err)
-		}
-		defer versionPQueue.Close()
-		defer os.Remove(queueFile)
-
-		size,_ := versionPQueue.Size(1)
-		fmt.Printf("version queue size %d\n", size)
-		if(size > 0){
-			versionPQueue.Dequeue()
-		}*/
 		for _,peer := range Manager.Peers.Peers{
 			SendVersion(peer.Rw, bc)
 		}
@@ -824,15 +819,15 @@ func StartServer(nodeID, minerAddress string) {
 		nodeIDs := dotray.QueryNodes(10)
 		fmt.Println("query nodes:", nodeIDs)
 	*/
-	 wallets, err := core.NewWallets("192.168.1.196:2000")
+	 wallets, err := core.NewWallets("192.168.1.101:2000")
 	 if err != nil {
 		 log.Panic(err)
 	 }
 	 walletaddrs := wallets.GetAddresses()
 	 wallet := wallets.GetWallet(walletaddrs[0])
 	 var peers []*discover.Node
-	 if(nodeID!="192.168.1.196:2000"){
-	 	peers = []*discover.Node{&discover.Node{IP: net.ParseIP("192.168.1.196"),TCP:2000,UDP:2000,ID: discover.PubkeyID(&wallet.PrivateKey.PublicKey)}}
+	 if(nodeID!="192.168.1.101:2000"){
+	 	peers = []*discover.Node{&discover.Node{IP: net.ParseIP("192.168.1.101"),TCP:2000,UDP:2000,ID: discover.PubkeyID(&wallet.PrivateKey.PublicKey)}}
 	 }else{
 	 	peers = nil
 	 }
@@ -860,22 +855,6 @@ func StartServer(nodeID, minerAddress string) {
 		 Config: config,
 	 }
 
-	 /*
-	//if there are some exception quit during syncing block then remove version command from queue at the start
-	queueFile := fmt.Sprintf("version_%s.db", node_id)
-	versionPQueue, err := NewPQueue(queueFile)
-	if err != nil {
-		log.Panic("create queue error",err)
-	}
-	defer versionPQueue.Close()
-	defer os.Remove(queueFile)
-
-	size,_ := versionPQueue.Size(1)
-	fmt.Printf("version queue size %d\n", size)
-	if(size > 0){
-		versionPQueue.Dequeue()
-	}*/
-
 	err = running.Start()
 	if err != nil {
 		 panic("server start panic:" + err.Error())
@@ -883,6 +862,12 @@ func StartServer(nodeID, minerAddress string) {
 	CurrentNodeInfo = running.NodeInfo()
  	fmt.Println("NodeInfo:", CurrentNodeInfo)
 
+	conf := &node.Config{
+		Name: "test node",
+		P2P:  config,
+	}
+	stack, err := node.New(conf)
+	StartNode(stack)
 
 	//bc := core.NewBlockchain(nodeID)
 	//fmt.Println("af NewBlockchain:")
@@ -907,20 +892,6 @@ func StartServer(nodeID, minerAddress string) {
 	//}
 
 	select {}
-	/*
-	// receive message from other nodes
-	for {
-		select {
-		case r := <-recv:
-			res := r.(*dotray.Request)
-			if(res.From != nodeAddress){
-				go handleConnectionR(res, bc)
-				fmt.Printf("receive message: %v from other node: \"%s\" \n", len(res.Data.([]byte)), res.From)
-			}
-			//datar := gobEncode(res.Data)
-			//dattas := string(datar)
-		}
-	}*/
 
 	/*for {
 		conn, err := ln.Accept()
@@ -1147,7 +1118,7 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 		blockHashs := bc.GetBlockHashesMap(myLastHash)
 		blockHashs1 := bc.DelBlockHashes(blockHashs)
 		if(len(blockHashs1) == 0){
-			log.Panic("no blocks deleted !")
+			log.Println("no blocks deleted !")
 		}
 		SendVersionStartConflict(p.Rw,myLastHash,bc)
 	//}
@@ -1238,3 +1209,27 @@ func confirmTx(newblock core.Block,wallet core.Wallet) bool {
 	}
 	return false
 }
+
+
+func StartNode(stack *node.Node) {
+	if err := stack.Start(); err != nil {
+		log.Fatalf("Error starting protocol stack: %v", err)
+	}
+	go func() {
+		sigc := make(chan os.Signal, 1)
+		signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+		defer signal.Stop(sigc)
+		<-sigc
+		log.Println("Got interrupt, shutting down...")
+		go stack.Stop()
+		/*for i := 10; i > 0; i-- {
+			<-sigc
+			if i > 1 {
+				log.Println("Already shutting down, interrupt more to panic.", "times", i-1)
+			}
+		}*/
+		//debug.Exit() // ensure trace and CPU profile data is flushed.
+		//debug.LoudPanic("boom")
+	}()
+}
+

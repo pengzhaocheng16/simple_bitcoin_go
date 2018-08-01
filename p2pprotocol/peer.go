@@ -57,6 +57,7 @@ type propEvent struct {
 	td    *big.Int
 }
 
+//Peer wrap p2p peer
 type Peer struct {
 	id string
 
@@ -499,3 +500,4 @@ func (p *Peer) AsyncSendTransactions(txs []*core.Transaction) {
 func (p *Peer) close() {
 	close(p.term)
 }
+
