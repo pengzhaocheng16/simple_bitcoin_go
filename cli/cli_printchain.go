@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"../blockchain_go"
+	"github.com/ethereum/go-ethereum/common"
+	"bytes"
 )
 
 func (cli *CLI) printChain(nodeID string) {
@@ -24,7 +26,7 @@ func (cli *CLI) printChain(nodeID string) {
 		}
 		fmt.Printf("\n\n")
 
-		if len(block.PrevBlockHash) == 0 {
+		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes())  {
 			break
 		}
 	}

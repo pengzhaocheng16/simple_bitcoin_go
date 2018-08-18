@@ -51,7 +51,7 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 		core.PendingIn(wallet,tx)
 		go func(){
 			if(p2pprotocol.CurrentNodeInfo == nil){
-				p2pprotocol.StartServer(nodeID,"")
+				p2pprotocol.StartServer(nodeID,"","","",0)
 			}
 		}()
 		time.Sleep(2*time.Second)

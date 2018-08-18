@@ -7,7 +7,7 @@ import (
 	"../p2pprotocol"
 )
 
-func (cli *CLI) startNode(nodeID, minerAddress string) {
+func (cli *CLI) startNode(nodeID, minerAddress string,ipcPath string,host string,port int) {
 	fmt.Printf("Starting node %s\n", nodeID)
 	if len(minerAddress) > 0 {
 		if core.ValidateAddress(minerAddress) {
@@ -17,5 +17,5 @@ func (cli *CLI) startNode(nodeID, minerAddress string) {
 		}
 	}
 
-	p2pprotocol.StartServer(nodeID, minerAddress)
+	p2pprotocol.StartServer(nodeID, minerAddress, ipcPath,host,port)
 }

@@ -20,7 +20,7 @@ func (cli *CLI) printUsage() {
 	fmt.Println("  printchain - Print all the blocks of the blockchain")
 	fmt.Println("  reindexutxo - Rebuilds the UTXO set")
 	fmt.Println("  send -from FROM -to TO -amount AMOUNT -mine - Send AMOUNT of coins from FROM address to TO. Mine on the same node, when -mine is set.")
-	fmt.Println("  startnode -miner ADDRESS - Start a node with ID specified in NODE_ID env. var. -miner enables mining")
+	fmt.Println("  startnode -miner ADDRESS -ipcpath IPCPATH - Start a node with ID specified in NODE_ID env. var. -miner enables mining")
 }
 
 func (cli *CLI) validateArgs() {
@@ -58,6 +58,9 @@ func (cli *CLI) Run() {
 	sendAmount := sendCmd.Int("amount", 0, "Amount to send")
 	sendMine := sendCmd.Bool("mine", false, "Mine immediately on the same node")
 	startNodeMiner := startNodeCmd.String("miner", "", "Enable mining mode and send reward to ADDRESS")
+	startNodeIpcPath := startNodeCmd.String("ipcpath", "", "Set rpc ipcpath")
+	startNodeHost := startNodeCmd.String("host", "", "Set rpc host")
+	startNodePort := startNodeCmd.Int("port", 0, "Set rpc port")
 
 	switch os.Args[1] {
 	case "getbalance":
@@ -156,6 +159,6 @@ func (cli *CLI) Run() {
 			os.Exit(1)
 		}
 
-		cli.startNode(nodeID, *startNodeMiner)
+		cli.startNode(nodeID, *startNodeMiner,*startNodeIpcPath,*startNodeHost,*startNodePort)
 	}
 }
