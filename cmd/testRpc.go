@@ -4,7 +4,8 @@ package main
 import (
 	"fmt"
 	"../rpc"
-	"../blockchain_go"
+	"math/big"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 func main() {
@@ -15,9 +16,21 @@ func main() {
 		return
 	}
 
-	var  block *core.Block
-	err = client.Call(&block, "CurrentBlock")
-	fmt.Println("block ", block)
+
+	var  blockNumber uint64
+	var  swc_coinbase string
+	var  clientversion string
+	var  block map[string]interface{}
+	err = client.Call(&blockNumber, "swc_blockNumber")
+	err = client.Call(&swc_coinbase, "swc_coinbase")
+	err = client.Call(&clientversion, "web3_clientVersion")
+	var bigint = new(big.Int).SetInt64(0)
+	var big = (*hexutil.Big)(bigint)
+	err = client.Call(&block, "swc_getBlockByNumber",big,false)
+	fmt.Println("swc_blockNumber ", blockNumber)
+	fmt.Println("swc_coinbase ", swc_coinbase)
+	fmt.Println("web3_clientversion ", clientversion)
+	fmt.Println("swc_getBlockByNumber ", block)
 
 	/*var account[]string
 	err = client.Call(&account, "eth_accounts")
@@ -33,4 +46,10 @@ func main() {
 
 	//fmt.Printf("account[0]: %s\nbalance[0]: %s\n", account[0], result)
 	//fmt.Printf("accounts: %s\n", account[0])
+
+	/*
+	curl --header "Content-Type:application/json"  --data {\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"0x407\", \"latest\"],\"id\":1} http://localhost:8545
+	 curl -l -H "Content-Type:application/json" -H "Accept:application/json" -X POST -d {\"jsonrpc\":\"2.0\",\"method\":\"swc_coinbase\",\"id\":1} http://localhost:8545
+
+	*/
 }
