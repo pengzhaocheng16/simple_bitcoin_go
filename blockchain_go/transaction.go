@@ -364,3 +364,4 @@ func VerifyTx(tx Transaction,bc *Blockchain)bool{
 		return false
 	}
 }
+

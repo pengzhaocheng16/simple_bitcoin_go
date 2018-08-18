@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/big"
 	"bytes"
+	//"crypto/sha256"
 )
 
 var (
@@ -36,7 +37,7 @@ func NewProofOfWork(b *Block,targetBits int64) *ProofOfWork {
 func (pow *ProofOfWork) prepareData(nonce int) []byte {
 	data := bytes.Join(
 		[][]byte{
-			pow.block.PrevBlockHash,
+			pow.block.PrevBlockHash.Bytes(),
 			pow.block.HashTransactions(),
 			IntToHex(pow.block.Timestamp.Int64()),
 			IntToHex(int64(targetBitsVar)),
@@ -60,8 +61,22 @@ func (pow *ProofOfWork) Run() (int, []byte) {
 		data = pow.prepareData(nonce)
 
 		hash = sha256.Sum256(data)
-		fmt.Printf("\r%x", hash)
+		/*var err error
+		hash,err = scrypt.GenerateFromPassword([]byte(data), scrypt.DefaultParams)
+		if(err!=nil){
+			log.Panic(err)
+		}
+		hashst := fmt.Sprintf("%s", hash)
+		hasharray := strings.Split(hashst, "$")
+		hashr := hasharray[len(hasharray)-2] + hasharray[len(hasharray)-1]
+		fmt.Println("\r hashr --%s ", hashr)
+		hash,err = hex.DecodeString(hashr)
+		if(err!=nil){
+			log.Panic(err)
+		}
+*/
 		hashInt.SetBytes(hash[:])
+		fmt.Printf("\r%x", hash)
 
 		if hashInt.Cmp(pow.target) == -1 {
 			fmt.Printf("newBlock.PrevBlockHash nonce %x \n",  sha256.Sum256(IntToHex(int64(nonce))))

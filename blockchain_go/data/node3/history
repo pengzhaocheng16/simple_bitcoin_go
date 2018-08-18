@@ -1,0 +1,1 @@
+geth --datadir data/node3    --nodekey boot.key --ipcpath data1 -rpc  --rpcport 8002 --port 30304 --bootnodes enode://5a623466d864d2686a5cc285e0ce66b917317cf23cdd21f1d1237d2d6867004c48e7f3369e7eccb668b0b08dc5216f472bd6fa2f4dc077e034544436f95be9f4@192.168.100.194:30301 console

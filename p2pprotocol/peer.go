@@ -15,6 +15,7 @@ import (
 	"gopkg.in/fatih/set.v0"
 	"os"
 	"encoding/hex"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 const (
@@ -107,8 +108,8 @@ type statusData struct {
 	ProtocolVersion uint32
 	NetworkId       string
 	TD              *big.Int
-	CurrentBlock    []byte
-	GenesisBlock    []byte
+	CurrentBlock    common.Hash
+	GenesisBlock    common.Hash
 }
 
 type txsync struct {
@@ -135,7 +136,7 @@ func (pm *ProtocolManager) removePeer(id string,blockchain *core.Blockchain) {
 	if peer == nil {
 		return
 	}
-	log.Print("+++Removing nncoin peer", "peer", id)
+	log.Print("+++Removing swarmchain peer", "peer", id)
 
 	// Unregister the peer from the downloader and Ethereum peer set
 	// pm.downloader.UnregisterPeer(id)
@@ -464,7 +465,7 @@ func (p *Peer) SendTransactions(txs core.Transactions) error {
 
 // SendNewBlock propagates an entire block to a remote peer.
 func (p *Peer) SendNewBlock(block *core.Block, td *big.Int) error {
-	p.knownBlocks.Add(hex.EncodeToString(block.Hash))
+	p.knownBlocks.Add(hex.EncodeToString(block.Hash.Bytes()))
 	//return p2p.Send(p.Rw, NewBlockMsg, []interface{}{block, td})
 	return sendBlock(p.Rw,block)
 }
@@ -474,7 +475,7 @@ func (p *Peer) SendNewBlock(block *core.Block, td *big.Int) error {
 func (p *Peer) AsyncSendNewBlock(block *core.Block, td *big.Int) {
 	select {
 	case p.queuedProps <- &propEvent{block: block, td: td}:
-		p.knownBlocks.Add(hex.EncodeToString(block.Hash))
+		p.knownBlocks.Add(hex.EncodeToString(block.Hash.Bytes()))
 	default:
 		p.Log().Debug("Dropping block propagation", "number", block.Height, "hash", block.Hash)
 	}

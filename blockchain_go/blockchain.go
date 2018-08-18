@@ -13,6 +13,8 @@ import (
 	"strings"
 	"math/big"
 	"crypto/sha256"
+	"github.com/ethereum/go-ethereum/common"
+	"../blockchain_go/rawdb"
 )
 
 const dbFile = "blockchain_%s.db"
@@ -23,8 +25,8 @@ const halfRewardblockCount = 210000
 
 // Blockchain implements interactions with a DB
 type Blockchain struct {
-	GenesisHash []byte
-	tip []byte
+	GenesisHash common.Hash
+	tip common.Hash
 	Db  *bolt.DB
 }
 
@@ -44,8 +46,8 @@ func CreateBlockchain(address, nodeID string) *Blockchain {
 		os.Exit(1)
 	}
 
-	var tip []byte
-	var genesisHash []byte
+	var tip common.Hash
+	var genesisHash common.Hash
 
 	cbtx := NewCoinbaseTX(address, genesisCoinbaseData)
 	genesis := NewGenesisBlock(cbtx)
@@ -61,28 +63,28 @@ func CreateBlockchain(address, nodeID string) *Blockchain {
 			log.Panic(err)
 		}
 
-		err = b.Put(genesis.Hash, genesis.Serialize())
+		err = b.Put(genesis.Hash.Bytes(), genesis.Serialize())
 		if err != nil {
 			log.Panic(err)
 		}
 
-		err = b.Put([]byte("l"), genesis.Hash)
+		err = b.Put([]byte("l"), genesis.Hash.Bytes())
 		if err != nil {
 			log.Panic(err)
 		}
 		tip = genesis.Hash
 
-		err = b.Put([]byte("g"), genesis.Hash)
+		err = b.Put([]byte("g"), genesis.Hash.Bytes())
 		if err != nil {
 			log.Panic(err)
 		}
 		genesisHash = genesis.Hash
-
 		return nil
 	})
 	if err != nil {
 		log.Panic(err)
 	}
+	rawdb.WriteCanonicalHash(db,genesis.Hash,0)
 
 	bc := Blockchain{genesisHash,tip, db}
 	return &bc
@@ -97,8 +99,8 @@ func NewBlockchain(nodeID string) *Blockchain {
 	}
 
 	fmt.Println("--- bf Open dbFile:")
-	var tip []byte
-	var genesisHash []byte
+	var tip common.Hash
+	var genesisHash common.Hash
 	db, err := bolt.Open(dbFile, 0600, nil)
 	if err != nil {
 		log.Panic(err)
@@ -107,8 +109,8 @@ func NewBlockchain(nodeID string) *Blockchain {
 	fmt.Println("--- bf db.View:")
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
-		tip = b.Get([]byte("l"))
-		genesisHash = b.Get([]byte("g"))
+		tip = common.BytesToHash(b.Get([]byte("l")))
+		genesisHash = common.BytesToHash(b.Get([]byte("g")))
 		return nil
 	})
 	if err != nil {
@@ -124,14 +126,14 @@ func NewBlockchain(nodeID string) *Blockchain {
 func (bc *Blockchain) AddBlock(block *Block) {
 	err := bc.Db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
-		blockInDb := b.Get(block.Hash)
+		blockInDb := b.Get(block.Hash.Bytes())
 
 		if blockInDb != nil {
 			return nil
 		}
 
 		blockData := block.Serialize()
-		err := b.Put(block.Hash, blockData)
+		err := b.Put(block.Hash.Bytes(), blockData)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -141,7 +143,7 @@ func (bc *Blockchain) AddBlock(block *Block) {
 		lastBlock := DeserializeBlock(lastBlockData)
 
 		if block.Height.Cmp(lastBlock.Height) > 0 {
-			err = b.Put([]byte("l"), block.Hash)
+			err = b.Put([]byte("l"), block.Hash.Bytes())
 			if err != nil {
 				log.Panic(err)
 			}
@@ -169,7 +171,7 @@ func (bc *Blockchain) FindTransaction(ID []byte) (Transaction, error) {
 			}
 		}
 
-		if len(block.PrevBlockHash) == 0 {
+		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes())  {
 			break
 		}
 	}
@@ -213,7 +215,8 @@ func (bc *Blockchain) FindUTXO() map[string]TXOutputs {
 			}
 		}
 
-		if len(block.PrevBlockHash) == 0 {
+		//fmt.Println("block.PrevBlockHash.Bytes() ",block.PrevBlockHash.Bytes())
+		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes()){
 			break
 		}
 	}
@@ -223,13 +226,14 @@ func (bc *Blockchain) FindUTXO() map[string]TXOutputs {
 
 // Iterator returns a BlockchainIterat
 func (bc *Blockchain) Iterator() *BlockchainIterator {
+	//fmt.Println("tip ",bc.tip)
 	bci := &BlockchainIterator{bc.tip, bc.Db}
 
 	return bci
 }
 
-// GetBestHeight returns the height of the latest block
-func (bc *Blockchain) GetBestHeightLastHash() (*big.Int,[]byte) {
+// GetBestHeight returns the height of the latest block and last block hash
+func (bc *Blockchain) GetBestHeightLastHash() (*big.Int,common.Hash) {
 	var lastBlock Block
 
 	err := bc.Db.View(func(tx *bolt.Tx) error {
@@ -252,7 +256,7 @@ func (bc *Blockchain) GetBestHeightLastHash() (*big.Int,[]byte) {
 // GetBestHeight returns the height of the latest block
 func (bc *Blockchain) GetBestHeight() (*big.Int,string) {
 	height,lastHash:= bc.GetBestHeightLastHash()
-	return height,hex.EncodeToString(lastHash)
+	return height,hex.EncodeToString(lastHash.Bytes())
 }
 
 // GetBlock finds a block by its hash and returns it
@@ -287,18 +291,18 @@ func (bc *Blockchain) GetBlockHashes(lastHash string) [][]byte {
 	stopBlock := false
 	for {
 		block := bci.Next()
-		fmt.Printf("--------->GetBlockHashes 1 len(block.PrevBlockHash) %s\n", len(block.PrevBlockHash))
-		if len(block.PrevBlockHash) == 0 {
+		fmt.Printf("--------->GetBlockHashes 1 bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes()) %s\n", bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes()))
+		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes())  {
 			break
 		}
 		fmt.Printf("--------->GetBlockHashes 2 lastHash %s\n", lastHash)
-		if(lastHash == hex.EncodeToString(block.Hash)) {
+		if(lastHash == hex.EncodeToString(block.Hash.Bytes())) {
 			stopBlock = true
 			continue
 		}
 		fmt.Printf("--------->GetBlockHashes 3 stopBlock %s\n", stopBlock)
 		if(!stopBlock){
-			blocks = append(blocks, block.Hash)
+			blocks = append(blocks, block.Hash.Bytes())
 		}
 	}
 	fmt.Printf("prepare blocks with %d \n", len(blocks))
@@ -314,19 +318,19 @@ func (bc *Blockchain) GetBlockHashesMap(lastHash []byte) map[string][]byte {
 	stopBlock := false
 	for {
 		block := bci.Next()
-		fmt.Printf("--------->GetBlockHashes 1 len(block.PrevBlockHash) %s\n", len(block.PrevBlockHash))
-		if len(block.PrevBlockHash) == 0 {
+		fmt.Printf("--------->GetBlockHashes 1 bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes()) %s\n", bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes()))
+		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes())  {
 			break
 		}
 		fmt.Printf("--------->GetBlockHashes 2 lastHash %x\n", lastHash)
-		if(bytes.Equal(lastHash,block.Hash)) {
+		if(bytes.Equal(lastHash,block.Hash.Bytes())) {
 			stopBlock = true
 			continue
 		}
-		hashstr := hex.EncodeToString(block.Hash)
+		hashstr := hex.EncodeToString(block.Hash.Bytes())
 		fmt.Printf("--------->GetBlockHashes 3 stopBlock %s\n", stopBlock)
 		if(!stopBlock){
-			blocks[hashstr] = block.Hash
+			blocks[hashstr] = block.Hash.Bytes()
 		}
 	}
 	fmt.Printf("prepare blocks with %d \n", len(blocks))
@@ -361,12 +365,12 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) *Block {
 
 	err = bc.Db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
-		err := b.Put(newBlock.Hash, newBlock.Serialize())
+		err := b.Put(newBlock.Hash.Bytes(), newBlock.Serialize())
 		if err != nil {
 			log.Panic(err)
 		}
 
-		err = b.Put([]byte("l"), newBlock.Hash)
+		err = b.Put([]byte("l"), newBlock.Hash.Bytes())
 		if err != nil {
 			log.Panic(err)
 		}
@@ -435,7 +439,7 @@ func (bc *Blockchain)IsBlockValid(newBlock *Block) (bool,int) {
 	var reason = 0
 	err := bc.Db.View(func(tx *bolt.Tx) (error) {
 		b := tx.Bucket([]byte(blocksBucket))
-		blockInDb := b.Get(newBlock.Hash)
+		blockInDb := b.Get(newBlock.Hash.Bytes())
 
 		if blockInDb != nil {
 			return nil
@@ -549,32 +553,81 @@ func calculateHash(block *Block) ([]byte,*ProofOfWork) {
 
 //}
 
-// DleteBlocks returns a list of hashes of all the blocks after a block in the chain
+// Delete Blocks returns a list of hashes of all the blocks after a block in the chain
 func (bc *Blockchain) DelBlockHashes(hashs map[string][]byte) [][]byte {
 	var blocks [][]byte
 	bci := bc.Iterator()
 
 	for{
 		block := bci.Next()
-		if len(block.PrevBlockHash) == 0 {
+		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes())  {
 			break
 		}
-		if _, ok := hashs[hex.EncodeToString(block.Hash)]; ok  {
+		if _, ok := hashs[hex.EncodeToString(block.Hash.Bytes())]; ok  {
 			err := bc.Db.Update(func(tx *bolt.Tx) error {
 				b, err := tx.CreateBucket([]byte(blocksBucket))
 				if err != nil {
 					log.Panic(err)
 				}
-				return b.Delete(block.Hash)
+				return b.Delete(block.Hash.Bytes())
 			})
 			if(err != nil){
 				log.Panic(err)
 			}
-			blocks = append(blocks, block.Hash)
+			blocks = append(blocks, block.Hash.Bytes())
 		}
 
 	}
 	fmt.Printf("delete blocks with %d \n", len(blocks))
 
 	return blocks
+}
+
+func (bc *Blockchain) CurrentBlock() *Block {
+	// GetBestHeight returns the height of the latest block and last block hash
+	var lastBlock Block
+
+	fmt.Println(" current block：")
+	err := bc.Db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+		lastHash := b.Get([]byte("l"))
+		blockData := b.Get(lastHash)
+		lastBlock = *DeserializeBlock(blockData)
+		fmt.Println("current block 1：",lastBlock.Hash)
+		//fmt.Println("bf lastBlock.Hash set value：", lastBlock.Hash)
+		//lastBlock.Hash = lastHash
+		//fmt.Println("af lastBlock.Hash set value：", lastBlock.Hash)
+		return nil
+	})
+	if err != nil {
+		log.Panic(err)
+	}
+	fmt.Println("current block 2：",lastBlock.Height.String())
+	return &lastBlock
+}
+
+
+func (bc *Blockchain) GetBlockByNumber(number uint64) *Block {
+	// GetBestHeight returns the height of the latest block and last block hash
+	var lastBlock Block
+	fmt.Println("block number ：", number)
+	hash := rawdb.ReadCanonicalHash(bc.Db, number)
+	fmt.Println("block hash ：", hash)
+	if hash == (common.Hash{}) {
+		return nil
+	}
+
+	err := bc.Db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+		blockData := b.Get(hash.Bytes())
+		lastBlock = *DeserializeBlock(blockData)
+		//fmt.Println("bf lastBlock.Hash set value：", lastBlock.Hash)
+		//lastBlock.Hash = lastHash
+		//fmt.Println("af lastBlock.Hash set value：", lastBlock.Hash)
+		return nil
+	})
+	if err != nil {
+		log.Panic(err)
+	}
+	return &lastBlock
 }

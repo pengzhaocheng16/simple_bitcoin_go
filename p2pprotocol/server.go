@@ -25,6 +25,8 @@ import (
 	"../node"
 	//"github.com/ethereum/go-ethereum/internal/debug"
 	"github.com/ethereum/go-ethereum/crypto"
+
+	"../blockchain_go/rawdb"
 )
 
 const protocol = "tcp"
@@ -36,7 +38,7 @@ const txsyncPackSize = 100 * 1024
 
 var nodeAddress string
 var miningAddress string
-var BootNodes = []string{"192.168.1.101:2000"}
+var BootNodes = []string{"192.168.43.134:2000"}
 var BootPeers = []*discover.Node{}
 var CurrentNodeInfo *p2p.NodeInfo
 var blocksInTransit = [][]byte{}
@@ -364,11 +366,11 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 
 	valid,reason := bc.IsBlockValid(block)
 	if( valid ){
-		if(!p.knownBlocks.Has(hex.EncodeToString(block.Hash))){
+		if(!p.knownBlocks.Has(hex.EncodeToString(block.Hash.Bytes()))){
 			bc.AddBlock(block)
 			p.lock.RLock()
 			//Manager.CurrTd = block.Height
-			p.knownBlocks.Add(hex.EncodeToString(block.Hash))
+			p.knownBlocks.Add(hex.EncodeToString(block.Hash.Bytes()))
 			//defer p.lock.RUnlock()
 			p.lock.RUnlock()
 		}
@@ -398,7 +400,7 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 		blockHashStr := hex.EncodeToString(blockHash)
 		if(blocksInTransitSet.Has(blockHashStr)){
 			sendGetData(p.Rw, "block", blockHash)
-			blocksInTransitSet.Remove(hex.EncodeToString(block.Hash))
+			blocksInTransitSet.Remove(hex.EncodeToString(block.Hash.Bytes()))
 		}
 		if(len(blocksInTransit) > 1){
 			blocksInTransit = blocksInTransit[:len(blocksInTransit)-1]
@@ -415,6 +417,7 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 	}
 	UTXOSet := core.UTXOSet{bc}
 	UTXOSet.Update(block)
+	rawdb.WriteCanonicalHash(bc.Db, block.Hash, block.Height.Uint64())
 }
 
 func handleInv(p *Peer,command Command, bc *core.Blockchain) {
@@ -658,7 +661,7 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 
 	log.Println("==>handle version receive payload BestHeight：", payload.BestHeight)
 	myBestHeight,myLastHash := bc.GetBestHeightLastHash()
-	myLastHashStr := hex.EncodeToString(myLastHash)
+	myLastHashStr := hex.EncodeToString(myLastHash.Bytes())
 	foreignerBestHeight := payload.BestHeight
 
 	p.Td = foreignerBestHeight
@@ -666,7 +669,7 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 	if myBestHeight.Cmp(foreignerBestHeight) <= 0 {
 		//sendGetBlocks(payload.AddrFrom,myLastHash)
 		if(myBestHeight.Cmp(foreignerBestHeight) < 0){
-			enqueueVersion(myLastHash)
+			enqueueVersion(myLastHash.Bytes())
 			sendGetBlocks(p.Rw,myLastHashStr)
 		}
 		go func() {
@@ -784,7 +787,7 @@ func HandleConnection(p *Peer,command Command, bc *core.Blockchain) {
 }*/
 
 // StartServer starts a node
-func StartServer(nodeID, minerAddress string) {
+func StartServer(nodeID, minerAddress string, ipcPath string,host string,port int) {
 	//nodeAddress = fmt.Sprintf("localhost:%s", nodeID)
 	srp := strings.NewReplacer(":", "_")
 	node_id = srp.Replace(nodeID)
@@ -819,15 +822,15 @@ func StartServer(nodeID, minerAddress string) {
 		nodeIDs := dotray.QueryNodes(10)
 		fmt.Println("query nodes:", nodeIDs)
 	*/
-	 wallets, err := core.NewWallets("192.168.1.101:2000")
+	 wallets, err := core.NewWallets("192.168.43.134:2000")
 	 if err != nil {
 		 log.Panic(err)
 	 }
 	 walletaddrs := wallets.GetAddresses()
 	 wallet := wallets.GetWallet(walletaddrs[0])
 	 var peers []*discover.Node
-	 if(nodeID!="192.168.1.101:2000"){
-	 	peers = []*discover.Node{&discover.Node{IP: net.ParseIP("192.168.1.101"),TCP:2000,UDP:2000,ID: discover.PubkeyID(&wallet.PrivateKey.PublicKey)}}
+	 if(nodeID!="192.168.43.134:2000"){
+	 	peers = []*discover.Node{&discover.Node{IP: net.ParseIP("192.168.43.134"),TCP:2000,UDP:2000,ID: discover.PubkeyID(&wallet.PrivateKey.PublicKey)}}
 	 }else{
 	 	peers = nil
 	 }
@@ -862,12 +865,68 @@ func StartServer(nodeID, minerAddress string) {
 	CurrentNodeInfo = running.NodeInfo()
  	fmt.Println("NodeInfo:", CurrentNodeInfo)
 
+	if(ipcPath == ""){
+		ipcPath = "cli\\test.ipc"
+	}
+	if(host == ""){
+		host = node.DefaultHTTPHost
+	}
+	if(port == 0){
+		port = node.DefaultHTTPPort
+	}
 	conf := &node.Config{
 		Name: "test node",
 		P2P:  config,
+		Etherbase:common.BytesToAddress(wallet1.GetAddress()),
+		NodeID:nodeID,
+		IPCPath:ipcPath,
+		HTTPHost:host,
+		HTTPPort:port,
+		HTTPCors:[]string{"*"},
+		HTTPVirtualHosts:[]string{"localhost"},
 	}
 	stack, err := node.New(conf)
-	StartNode(stack)
+	// Register a batch of life-cycle instrumented services
+	services := map[string]node.InstrumentingWrapper{
+		"A": node.InstrumentedServiceMakerA,
+		"B": node.InstrumentedServiceMakerB,
+		"C": node.InstrumentedServiceMakerC,
+	}
+	started := make(map[string]bool)
+	stopped := make(map[string]bool)
+
+	for id, maker := range services {
+		id := id // Closure for the constructor
+		constructor := func(*node.ServiceContext) (node.Service, error) {
+			return &node.InstrumentedService{
+				StartHook: func(*p2p.Server) { started[id] = true },
+				StopHook:  func() { stopped[id] = true },
+			}, nil
+		}
+		if err := stack.Register(maker(constructor)); err != nil {
+			//t.Fatalf("service %s: registration failed: %v", id, err)
+			log.Fatalf("service %s: registration failed: %v", id, err)
+		}
+	}
+
+	err = stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
+		fullNode, err := New(ctx,conf)
+
+		return fullNode, err
+	})
+	if err != nil {
+		log.Fatalf("Failed to register the Ethereum service: %v", err)
+	}
+	StartNode(stack,running)
+	// Restart the stack a few times and check successful service restarts
+	//for i := 0; i < 2; i++ {
+	//	if err := stack.Restart(nil); err != nil {
+	//		log.Fatalf("iter %d: failed to restart stack: %v", i, err)
+	//	}
+	//}
+	//if  len(started) != 3 {
+	//	log.Fatalf("running/started mismatch: have %v/%d, want true/4", running, started)
+	//}
 
 	//bc := core.NewBlockchain(nodeID)
 	//fmt.Println("af NewBlockchain:")
@@ -947,7 +1006,7 @@ func (pm *ProtocolManager) BroadcastTxs(txs core.Transactions) {
 		for _, peer := range peers {
 			txset[peer] = append(txset[peer], tx)
 		}
-		//log.Trace("Broadcast transaction", "hash", tx.Hash(), "recipients", len(peers))
+		log.Println("Broadcast transaction", "hash", tx.Hash(), "recipients", len(peers))
 	}
 	// FIXME include this again: peers = peers[:int(math.Sqrt(float64(len(peers))))]
 	for peer, txs := range txset {
@@ -1175,7 +1234,7 @@ func confirmTx(newblock core.Block,wallet core.Wallet) bool {
 		hash4 := hex.EncodeToString(txiddata[96:128])
 		hash5 := hex.EncodeToString(txiddata[128:160])
 		hash6 := hex.EncodeToString(txiddata[160:192])
-		switch hex.EncodeToString(newblock.PrevBlockHash) {
+		switch hex.EncodeToString(newblock.PrevBlockHash.Bytes()) {
 		case hash1:
 		case hash2:
 		case hash3:
@@ -1197,7 +1256,7 @@ func confirmTx(newblock core.Block,wallet core.Wallet) bool {
 		counter[0] = counter[0] + 1
 		// confirmation’s block hash 32 * 6 =192 bytes
 		var blockHash= []byte{}
-		blockHash = append(blockHash, newblock.Hash...)
+		blockHash = append(blockHash, newblock.Hash.Bytes()...)
 
 		newtxid := append(counter, blockHash...)
 		newtxid = append(counter, iddata...)
@@ -1211,8 +1270,8 @@ func confirmTx(newblock core.Block,wallet core.Wallet) bool {
 }
 
 
-func StartNode(stack *node.Node) {
-	if err := stack.Start(); err != nil {
+func StartNode(stack *node.Node,running *p2p.Server) {
+	if err := stack.Start(running); err != nil {
 		log.Fatalf("Error starting protocol stack: %v", err)
 	}
 	go func() {

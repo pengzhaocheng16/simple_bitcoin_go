@@ -4,11 +4,12 @@ import (
 	"log"
 
 	"github.com/boltdb/bolt"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // BlockchainIterator is used to iterate over blockchain blocks
 type BlockchainIterator struct {
-	currentHash []byte
+	currentHash common.Hash
 	db          *bolt.DB
 }
 
@@ -18,7 +19,9 @@ func (i *BlockchainIterator) Next() *Block {
 
 	err := i.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
-		encodedBlock := b.Get(i.currentHash)
+		//fmt.Println("currentHash ",i.currentHash)
+		encodedBlock := b.Get(i.currentHash.Bytes())
+		//fmt.Println("len encodedBlock ",len(encodedBlock))
 		block = DeserializeBlock(encodedBlock)
 
 		return nil

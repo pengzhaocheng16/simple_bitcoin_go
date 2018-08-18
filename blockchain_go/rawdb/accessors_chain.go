@@ -17,19 +17,28 @@
 package rawdb
 
 import (
-	"bytes"
-	"encoding/binary"
-	"math/big"
+	//"bytes"
+	//"encoding/binary"
+	//"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
+	//"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rlp"
+	//"github.com/ethereum/go-ethereum/rlp"
+	"github.com/boltdb/bolt"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
-func ReadCanonicalHash(db DatabaseReader, number uint64) common.Hash {
-	data, _ := db.Get(append(append(headerPrefix, encodeBlockNumber(number)...), headerHashSuffix...))
+func ReadCanonicalHash(db *bolt.DB, number uint64) common.Hash {
+	var data []byte
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(rawdbBucket))
+		data = b.Get(append(append(headerPrefix, encodeBlockNumber(number)...), headerHashSuffix...))
+		return nil
+	})
+	if err != nil {
+		log.Error("Failed to load number to hash mapping",err)
+	}
 	if len(data) == 0 {
 		return common.Hash{}
 	}
@@ -37,13 +46,25 @@ func ReadCanonicalHash(db DatabaseReader, number uint64) common.Hash {
 }
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
-func WriteCanonicalHash(db DatabaseWriter, hash common.Hash, number uint64) {
+func WriteCanonicalHash(db *bolt.DB, hash common.Hash, number uint64) {
 	key := append(append(headerPrefix, encodeBlockNumber(number)...), headerHashSuffix...)
-	if err := db.Put(key, hash.Bytes()); err != nil {
-		log.Crit("Failed to store number to hash mapping", "err", err)
+
+
+	err := db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucket([]byte(rawdbBucket))
+		if err != nil {
+			return err
+		}
+		if err := b.Put(key, hash.Bytes()); err != nil {
+			log.Crit("Failed to store number to hash mapping", "err", err)
+		}
+		return nil
+	})
+	if err != nil {
+		log.Error("Failed to store number to hash mapping",err)
 	}
 }
-
+/*
 // DeleteCanonicalHash removes the number to hash canonical mapping.
 func DeleteCanonicalHash(db DatabaseDeleter, number uint64) {
 	if err := db.Delete(append(append(headerPrefix, encodeBlockNumber(number)...), headerHashSuffix...)); err != nil {
@@ -71,7 +92,7 @@ func ReadHeadHeaderHash(db DatabaseReader) common.Hash {
 }
 
 // WriteHeadHeaderHash stores the hash of the current canonical head header.
-func WriteHeadHeaderHash(db DatabaseWriter, hash common.Hash) {
+func WriteHeadHeaderHash(db *bolt.DB, hash common.Hash) {
 	if err := db.Put(headHeaderKey, hash.Bytes()); err != nil {
 		log.Crit("Failed to store last header's hash", "err", err)
 	}
@@ -87,7 +108,7 @@ func ReadHeadBlockHash(db DatabaseReader) common.Hash {
 }
 
 // WriteHeadBlockHash stores the head block's hash.
-func WriteHeadBlockHash(db DatabaseWriter, hash common.Hash) {
+func WriteHeadBlockHash(db *bolt.DB, hash common.Hash) {
 	if err := db.Put(headBlockKey, hash.Bytes()); err != nil {
 		log.Crit("Failed to store last block's hash", "err", err)
 	}
@@ -103,7 +124,7 @@ func ReadHeadFastBlockHash(db DatabaseReader) common.Hash {
 }
 
 // WriteHeadFastBlockHash stores the hash of the current fast-sync head block.
-func WriteHeadFastBlockHash(db DatabaseWriter, hash common.Hash) {
+func WriteHeadFastBlockHash(db *bolt.DB, hash common.Hash) {
 	if err := db.Put(headFastBlockKey, hash.Bytes()); err != nil {
 		log.Crit("Failed to store last fast block's hash", "err", err)
 	}
@@ -121,7 +142,7 @@ func ReadFastTrieProgress(db DatabaseReader) uint64 {
 
 // WriteFastTrieProgress stores the fast sync trie process counter to support
 // retrieving it across restarts.
-func WriteFastTrieProgress(db DatabaseWriter, count uint64) {
+func WriteFastTrieProgress(db *bolt.DB, count uint64) {
 	if err := db.Put(fastTrieProgressKey, new(big.Int).SetUint64(count).Bytes()); err != nil {
 		log.Crit("Failed to store fast sync trie progress", "err", err)
 	}
@@ -158,7 +179,7 @@ func ReadHeader(db DatabaseReader, hash common.Hash, number uint64) *types.Heade
 
 // WriteHeader stores a block header into the database and also stores the hash-
 // to-number mapping.
-func WriteHeader(db DatabaseWriter, header *types.Header) {
+func WriteHeader(db *bolt.DB, header *types.Header) {
 	// Write the hash -> number mapping
 	var (
 		hash    = header.Hash().Bytes()
@@ -197,7 +218,7 @@ func ReadBodyRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValu
 }
 
 // WriteBodyRLP stores an RLP encoded block body into the database.
-func WriteBodyRLP(db DatabaseWriter, hash common.Hash, number uint64, rlp rlp.RawValue) {
+func WriteBodyRLP(db *bolt.DB, hash common.Hash, number uint64, rlp rlp.RawValue) {
 	key := append(append(blockBodyPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
 	if err := db.Put(key, rlp); err != nil {
 		log.Crit("Failed to store block body", "err", err)
@@ -228,7 +249,7 @@ func ReadBody(db DatabaseReader, hash common.Hash, number uint64) *types.Body {
 }
 
 // WriteBody storea a block body into the database.
-func WriteBody(db DatabaseWriter, hash common.Hash, number uint64, body *types.Body) {
+func WriteBody(db *bolt.DB, hash common.Hash, number uint64, body *types.Body) {
 	data, err := rlp.EncodeToBytes(body)
 	if err != nil {
 		log.Crit("Failed to RLP encode body", "err", err)
@@ -258,7 +279,7 @@ func ReadTd(db DatabaseReader, hash common.Hash, number uint64) *big.Int {
 }
 
 // WriteTd stores the total difficulty of a block into the database.
-func WriteTd(db DatabaseWriter, hash common.Hash, number uint64, td *big.Int) {
+func WriteTd(db *bolt.DB, hash common.Hash, number uint64, td *big.Int) {
 	data, err := rlp.EncodeToBytes(td)
 	if err != nil {
 		log.Crit("Failed to RLP encode block total difficulty", "err", err)
@@ -297,7 +318,7 @@ func ReadReceipts(db DatabaseReader, hash common.Hash, number uint64) types.Rece
 }
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
-func WriteReceipts(db DatabaseWriter, hash common.Hash, number uint64, receipts types.Receipts) {
+func WriteReceipts(db *bolt.DB, hash common.Hash, number uint64, receipts types.Receipts) {
 	// Convert the receipts into their storage form and serialize them
 	storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
 	for i, receipt := range receipts {
@@ -340,7 +361,7 @@ func ReadBlock(db DatabaseReader, hash common.Hash, number uint64) *types.Block 
 }
 
 // WriteBlock serializes a block into the database, header and body separately.
-func WriteBlock(db DatabaseWriter, block *types.Block) {
+func WriteBlock(db *bolt.DB, block *types.Block) {
 	WriteBody(db, block.Hash(), block.NumberU64(), block.Body())
 	WriteHeader(db, block.Header())
 }
@@ -379,3 +400,4 @@ func FindCommonAncestor(db DatabaseReader, a, b *types.Header) *types.Header {
 	}
 	return a
 }
+*/
