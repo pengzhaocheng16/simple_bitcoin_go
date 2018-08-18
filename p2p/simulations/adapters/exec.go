@@ -35,10 +35,10 @@ import (
 
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/node"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/discover"
-	"github.com/ethereum/go-ethereum/rpc"
+	"../../../node"
+	"../../../p2p"
+	"../../../p2p/discover"
+	"../../../rpc"
 	"golang.org/x/net/websocket"
 )
 
@@ -405,7 +405,7 @@ func execP2PNode() {
 	}
 
 	// start the stack
-	if err := stack.Start(); err != nil {
+	if err := stack.Start(nil); err != nil {
 		log.Crit("error stating node stack", "err", err)
 	}
 

@@ -25,10 +25,10 @@ import (
 
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/node"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/discover"
-	"github.com/ethereum/go-ethereum/rpc"
+	"../../../node"
+	"../../../p2p"
+	"../../../p2p/discover"
+	"../../../rpc"
 )
 
 // SimAdapter is a NodeAdapter which creates in-memory simulation nodes and
@@ -249,7 +249,7 @@ func (sn *SimNode) Start(snapshots map[string][]byte) error {
 		return regErr
 	}
 
-	if err := sn.node.Start(); err != nil {
+	if err := sn.node.Start(nil); err != nil {
 		return err
 	}
 

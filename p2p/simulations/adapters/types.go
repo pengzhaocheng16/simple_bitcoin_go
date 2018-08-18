@@ -26,10 +26,10 @@ import (
 
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/node"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/discover"
-	"github.com/ethereum/go-ethereum/rpc"
+	"../../../node"
+	"../../../p2p"
+	"../../../p2p/discover"
+	"../../../rpc"
 )
 
 // Node represents a node in a simulation network which is created by a

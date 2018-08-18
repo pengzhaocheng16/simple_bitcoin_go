@@ -785,6 +785,7 @@ func (srv *Server) listenLoop() {
 			} else if err != nil {
 				fmt.Println("Read error:", err)
 				srv.log.Debug("Read error", "err", err)
+				//break
 				return
 			}
 			break
