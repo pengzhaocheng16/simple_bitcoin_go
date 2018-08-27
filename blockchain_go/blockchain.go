@@ -21,7 +21,7 @@ const dbFile = "blockchain_%s.db"
 const blocksBucket = "blocks"
 const genesisCoinbaseData = "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks"
 
-const halfRewardblockCount = 210000
+const halfRewardblockCount = 2100000
 
 // Blockchain implements interactions with a DB
 type Blockchain struct {
@@ -630,4 +630,21 @@ func (bc *Blockchain) GetBlockByNumber(number uint64) *Block {
 		log.Panic(err)
 	}
 	return &lastBlock
+}
+
+func (bc *Blockchain)GetBalance(address, nodeID string)*big.Int{
+	UTXOSet := UTXOSet{bc}
+	defer bc.Db.Close()
+
+	balance := big.NewInt(0)
+	pubKeyHash := Base58Decode([]byte(address))
+	pubKeyHash = pubKeyHash[1 : len(pubKeyHash)-4]
+
+	UTXOs := UTXOSet.FindUTXO(pubKeyHash)
+
+	for _, out := range UTXOs {
+		balance.Add(big.NewInt(balance.Int64()),
+			big.NewInt(int64(out.Value)))
+	}
+	return balance
 }

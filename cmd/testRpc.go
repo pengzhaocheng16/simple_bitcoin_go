@@ -21,16 +21,23 @@ func main() {
 	var  swc_coinbase string
 	var  clientversion string
 	var  block map[string]interface{}
+
 	err = client.Call(&blockNumber, "swc_blockNumber")
 	err = client.Call(&swc_coinbase, "swc_coinbase")
 	err = client.Call(&clientversion, "web3_clientVersion")
 	var bigint = new(big.Int).SetInt64(0)
-	var big = (*hexutil.Big)(bigint)
-	err = client.Call(&block, "swc_getBlockByNumber",big,false)
+	var bigNumber = (*hexutil.Big)(bigint)
+	err = client.Call(&block, "swc_getBlockByNumber",bigNumber,false)
+
+	var  balance = int64(0)
+
+	err = client.Call(&balance, "swc_getBalance","1NWUWL17WtxzSMVWhGm8UD7Y45ikFUHZCx")
+
 	fmt.Println("swc_blockNumber ", blockNumber)
 	fmt.Println("swc_coinbase ", swc_coinbase)
 	fmt.Println("web3_clientversion ", clientversion)
 	fmt.Println("swc_getBlockByNumber ", block)
+	fmt.Println("swc_getBalance ",balance )
 
 	/*var account[]string
 	err = client.Call(&account, "eth_accounts")

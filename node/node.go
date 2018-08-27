@@ -135,7 +135,7 @@ func (n *Node) Register(constructor ServiceConstructor) error {
 }
 
 // Start create a live P2P node and starts running it.
-func (n *Node) Start() error {//running *p2p.Server
+func (n *Node) Start(running *p2p.Server) error {//
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -162,11 +162,13 @@ func (n *Node) Start() error {//running *p2p.Server
 	if n.serverConfig.NodeDatabase == "" {
 		n.serverConfig.NodeDatabase = n.config.NodeDB()
 	}
-	running := &p2p.Server{Config: n.serverConfig}
+	//running := &p2p.Server{Config: n.serverConfig}
+	println("Starting peer-to-peer node", "instance", n.serverConfig.Name)
 	n.log.Info("Starting peer-to-peer node", "instance", n.serverConfig.Name)
 
 	// Otherwise copy and specialize the P2P configuration
 	services := make(map[reflect.Type]Service)
+	println("len n.serviceFuncs  ",len(n.serviceFuncs))
 	for _, constructor := range n.serviceFuncs {
 		// Create a new context for the particular service
 		ctx := &ServiceContext{
@@ -181,24 +183,28 @@ func (n *Node) Start() error {//running *p2p.Server
 		// Construct and save the service
 		service, err := constructor(ctx)
 		if err != nil {
+			println("service constructor error ")
 			return err
 		}
 		kind := reflect.TypeOf(service)
+
 		if _, exists := services[kind]; exists {
 			return &DuplicateServiceError{Kind: kind}
 		}
 		services[kind] = service
 	}
 	// Gather the protocols and start the freshly assembled P2P server
-	for _, service := range services {
+	/*for _, service := range services {
 		running.Protocols = append(running.Protocols, service.Protocols()...)
 	}
 	if err := running.Start(); err != nil {
 		return convertFileLockError(err)
-	}
+	}*/
+	println("Start each of the services ")
 	// Start each of the services
 	started := []reflect.Type{}
 	for kind, service := range services {
+		println("service kind  ",kind.String()," service   ",service)
 		// Start the next service, stopping all previous upon failure
 		if err := service.Start(running); err != nil {
 			for _, kind := range started {
@@ -211,6 +217,7 @@ func (n *Node) Start() error {//running *p2p.Server
 		// Mark the service started for potential cleanup
 		started = append(started, kind)
 	}
+	println("Lastly start the configured RPC interfaces ")
 	// Lastly start the configured RPC interfaces
 	if err := n.startRPC(services); err != nil {
 		for _, service := range services {
@@ -223,7 +230,7 @@ func (n *Node) Start() error {//running *p2p.Server
 	n.services = services
 	n.server = running
 	n.stop = make(chan struct{})
-
+	println("Finished initializing the startup ")
 	return nil
 }
 
@@ -255,25 +262,34 @@ func (n *Node) startRPC(services map[reflect.Type]Service) error {
 	for _, service := range services {
 		apis = append(apis, service.APIs()...)
 	}
+	println(`start rpc `)
 	// Start the various API endpoints, terminating all in case of errors
 	if err := n.startInProc(apis); err != nil {
+		println(`start rpc InProc err`)
 		return err
 	}
+	println(`start rpc IPC - `,n.ipcEndpoint)
 	if err := n.startIPC(apis); err != nil {
+		println(`start rpc ipc err`)
 		n.stopInProc()
 		return err
 	}
+	println(`start rpc HTTP - `,n.httpEndpoint)
 	if err := n.startHTTP(n.httpEndpoint, apis, n.config.HTTPModules, n.config.HTTPCors, n.config.HTTPVirtualHosts); err != nil {
+		log.Info(`start rpc http err`)
 		n.stopIPC()
 		n.stopInProc()
 		return err
 	}
+	println(`start rpc WS -`,n.wsEndpoint)
 	if err := n.startWS(n.wsEndpoint, apis, n.config.WSModules, n.config.WSOrigins, n.config.WSExposeAll); err != nil {
+		println(`start rpc ws err`)
 		n.stopHTTP()
 		n.stopIPC()
 		n.stopInProc()
 		return err
 	}
+	println(`rpcAPIs `,len(apis))
 	// All API endpoints started successfully
 	n.rpcAPIs = apis
 	return nil
@@ -340,6 +356,7 @@ func (n *Node) startHTTP(endpoint string, apis []rpc.API, modules []string, cors
 	if err != nil {
 		return err
 	}
+	println("HTTP endpoint opened", "url", fmt.Sprintf("http://%s", endpoint), "cors", strings.Join(cors, ","), "vhosts", strings.Join(vhosts, ","))
 	n.log.Info("HTTP endpoint opened", "url", fmt.Sprintf("http://%s", endpoint), "cors", strings.Join(cors, ","), "vhosts", strings.Join(vhosts, ","))
 	// All listeners booted successfully
 	n.httpEndpoint = endpoint
@@ -466,11 +483,11 @@ func (n *Node) Wait() {
 
 // Restart terminates a running node and boots up a new one in its place. If the
 // node isn't running, an error is returned.
-func (n *Node) Restart() error {
+func (n *Node) Restart(running *p2p.Server) error {
 	if err := n.Stop(); err != nil {
 		return err
 	}
-	if err := n.Start(); err != nil {
+	if err := n.Start(running); err != nil {
 		return err
 	}
 	return nil
@@ -606,4 +623,81 @@ func (n *Node) apis() []rpc.API {
 			Public:    true,
 		},
 	}
+}
+
+
+/////////////////////////////////
+// InstrumentedService is an implementation of Service for which all interface
+// methods can be instrumented both return value as well as event hook wise.
+type InstrumentedService struct {
+	protocols []p2p.Protocol
+	apis      []rpc.API
+	start     error
+	stop      error
+
+	protocolsHook func()
+	StartHook     func(*p2p.Server)
+	StopHook      func()
+}
+
+func NewInstrumentedService(*ServiceContext) (Service, error) { return new(InstrumentedService), nil }
+/*
+func (s *InstrumentedService) Protocols() []p2p.Protocol {
+	if s.protocolsHook != nil {
+		s.protocolsHook()
+	}
+	return s.protocols
+}
+*/
+func (s *InstrumentedService) APIs() []rpc.API {
+	return s.apis
+}
+
+func (s *InstrumentedService) Start(server *p2p.Server) error {
+	if s.StartHook != nil {
+		s.StartHook(server)
+	}
+	return s.start
+}
+
+func (s *InstrumentedService) Stop() error {
+	if s.StopHook != nil {
+		s.StopHook()
+	}
+	return s.stop
+}
+
+// InstrumentingWrapper is a method to specialize a service constructor returning
+// a generic InstrumentedService into one returning a wrapping specific one.
+type InstrumentingWrapper func(base ServiceConstructor) ServiceConstructor
+
+func InstrumentingWrapperMaker(base ServiceConstructor, kind reflect.Type) ServiceConstructor {
+	return func(ctx *ServiceContext) (Service, error) {
+		obj, err := base(ctx)
+		if err != nil {
+			return nil, err
+		}
+		wrapper := reflect.New(kind)
+		wrapper.Elem().Field(0).Set(reflect.ValueOf(obj).Elem())
+
+		return wrapper.Interface().(Service), nil
+	}
+}
+
+// Set of services all wrapping the base InstrumentedService resulting in the
+// same method signatures but different outer types.
+type InstrumentedServiceA struct{ InstrumentedService }
+type InstrumentedServiceB struct{ InstrumentedService }
+type InstrumentedServiceC struct{ InstrumentedService }
+
+func InstrumentedServiceMakerA(base ServiceConstructor) ServiceConstructor {
+	return InstrumentingWrapperMaker(base, reflect.TypeOf(InstrumentedServiceA{}))
+}
+
+func InstrumentedServiceMakerB(base ServiceConstructor) ServiceConstructor {
+	return InstrumentingWrapperMaker(base, reflect.TypeOf(InstrumentedServiceB{}))
+}
+
+func InstrumentedServiceMakerC(base ServiceConstructor) ServiceConstructor {
+	return InstrumentingWrapperMaker(base, reflect.TypeOf(InstrumentedServiceC{}))
 }

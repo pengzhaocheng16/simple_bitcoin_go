@@ -44,9 +44,11 @@ func StartHTTPEndpoint(endpoint string, apis []API, modules []string, cors []str
 		listener net.Listener
 		err      error
 	)
+	println("net.Listen ","endpoint ",endpoint)
 	if listener, err = net.Listen("tcp", endpoint); err != nil {
 		return nil, nil, err
 	}
+	println("cors ",cors,"vhosts ",vhosts)
 	go NewHTTPServer(cors, vhosts, handler).Serve(listener)
 	return listener, handler, err
 }

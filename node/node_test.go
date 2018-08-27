@@ -53,15 +53,15 @@ func TestNodeLifeCycle(t *testing.T) {
 		}
 	}
 	// Ensure that a node can be successfully started, but only once
-	if err := stack.Start(); err != nil {
+	if err := stack.Start(nil); err != nil {
 		t.Fatalf("failed to start node: %v", err)
 	}
-	if err := stack.Start(); err != ErrNodeRunning {
+	if err := stack.Start(nil); err != ErrNodeRunning {
 		t.Fatalf("start failure mismatch: have %v, want %v ", err, ErrNodeRunning)
 	}
 	// Ensure that a node can be restarted arbitrarily many times
 	for i := 0; i < 3; i++ {
-		if err := stack.Restart(); err != nil {
+		if err := stack.Restart(nil); err != nil {
 			t.Fatalf("iter %d: failed to restart node: %v", i, err)
 		}
 	}
@@ -88,7 +88,7 @@ func TestNodeUsedDataDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create original protocol stack: %v", err)
 	}
-	if err := original.Start(); err != nil {
+	if err := original.Start(nil); err != nil {
 		t.Fatalf("failed to start original protocol stack: %v", err)
 	}
 	defer original.Stop()
@@ -98,7 +98,7 @@ func TestNodeUsedDataDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create duplicate protocol stack: %v", err)
 	}
-	if err := duplicate.Start(); err != ErrDatadirUsed {
+	if err := duplicate.Start(nil); err != ErrDatadirUsed {
 		t.Fatalf("duplicate datadir failure mismatch: have %v, want %v", err, ErrDatadirUsed)
 	}
 }
@@ -116,7 +116,7 @@ func TestServiceRegistry(t *testing.T) {
 			t.Fatalf("service #%d: registration failed: %v", i, err)
 		}
 	}
-	if err := stack.Start(); err != nil {
+	if err := stack.Start(nil); err != nil {
 		t.Fatalf("failed to start original service stack: %v", err)
 	}
 	if err := stack.Stop(); err != nil {
@@ -126,7 +126,7 @@ func TestServiceRegistry(t *testing.T) {
 	if err := stack.Register(NewNoopServiceB); err != nil {
 		t.Fatalf("duplicate registration failed: %v", err)
 	}
-	if err := stack.Start(); err == nil {
+	if err := stack.Start(nil); err == nil {
 		t.Fatalf("duplicate service started")
 	} else {
 		if _, ok := err.(*DuplicateServiceError); !ok {
@@ -163,7 +163,7 @@ func TestServiceLifeCycle(t *testing.T) {
 		}
 	}
 	// Start the node and check that all services are running
-	if err := stack.Start(); err != nil {
+	if err := stack.Start(nil); err != nil {
 		t.Fatalf("failed to start protocol stack: %v", err)
 	}
 	for id := range services {
@@ -213,7 +213,7 @@ func TestServiceRestarts(t *testing.T) {
 	if err := stack.Register(constructor); err != nil {
 		t.Fatalf("failed to register the service: %v", err)
 	}
-	if err := stack.Start(); err != nil {
+	if err := stack.Start(nil); err != nil {
 		t.Fatalf("failed to start protocol stack: %v", err)
 	}
 	defer stack.Stop()
@@ -223,7 +223,7 @@ func TestServiceRestarts(t *testing.T) {
 	}
 	// Restart the stack a few times and check successful service restarts
 	for i := 0; i < 3; i++ {
-		if err := stack.Restart(); err != nil {
+		if err := stack.Restart(nil); err != nil {
 			t.Fatalf("iter %d: failed to restart stack: %v", i, err)
 		}
 	}
@@ -267,7 +267,7 @@ func TestServiceConstructionAbortion(t *testing.T) {
 	}
 	// Start the protocol stack and ensure none of the services get started
 	for i := 0; i < 100; i++ {
-		if err := stack.Start(); err != failure {
+		if err := stack.Start(nil); err != failure {
 			t.Fatalf("iter %d: stack startup failure mismatch: have %v, want %v", i, err, failure)
 		}
 		for id := range services {
@@ -319,7 +319,7 @@ func TestServiceStartupAbortion(t *testing.T) {
 	}
 	// Start the protocol stack and ensure all started services stop
 	for i := 0; i < 100; i++ {
-		if err := stack.Start(); err != failure {
+		if err := stack.Start(nil); err != failure {
 			t.Fatalf("iter %d: stack startup failure mismatch: have %v, want %v", i, err, failure)
 		}
 		for id := range services {
@@ -373,7 +373,7 @@ func TestServiceTerminationGuarantee(t *testing.T) {
 	// Start the protocol stack, and ensure that a failing shut down terminates all
 	for i := 0; i < 100; i++ {
 		// Start the stack and make sure all is online
-		if err := stack.Start(); err != nil {
+		if err := stack.Start(nil); err != nil {
 			t.Fatalf("iter %d: failed to start protocol stack: %v", i, err)
 		}
 		for id := range services {
@@ -430,7 +430,7 @@ func TestServiceRetrieval(t *testing.T) {
 		t.Fatalf("instrumented service retrieval mismatch: have %v, want %v", err, ErrNodeStopped)
 	}
 	// Start the stack and ensure everything is retrievable now
-	if err := stack.Start(); err != nil {
+	if err := stack.Start(nil); err != nil {
 		t.Fatalf("failed to start stack: %v", err)
 	}
 	defer stack.Stop()
@@ -474,7 +474,7 @@ func TestProtocolGather(t *testing.T) {
 		}
 	}
 	// Start the services and ensure all protocols start successfully
-	if err := stack.Start(); err != nil {
+	if err := stack.Start(nil); err != nil {
 		t.Fatalf("failed to start protocol stack: %v", err)
 	}
 	defer stack.Stop()
@@ -538,7 +538,7 @@ func TestAPIGather(t *testing.T) {
 		}
 	}
 	// Start the services and ensure all API start successfully
-	if err := stack.Start(); err != nil {
+	if err := stack.Start(nil); err != nil {
 		t.Fatalf("failed to start protocol stack: %v", err)
 	}
 	defer stack.Stop()

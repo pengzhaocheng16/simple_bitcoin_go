@@ -11,7 +11,7 @@ func (cli *CLI) getBalance(address, nodeID string) {
 		log.Panic("ERROR: Address is not valid")
 	}
 	bc := core.NewBlockchain(nodeID)
-	UTXOSet := core.UTXOSet{bc}
+	/*UTXOSet := core.UTXOSet{bc}
 	defer bc.Db.Close()
 
 	balance := 0
@@ -21,7 +21,8 @@ func (cli *CLI) getBalance(address, nodeID string) {
 
 	for _, out := range UTXOs {
 		balance += out.Value
-	}
+	}*/
+	balance := bc.GetBalance(address,nodeID);
 
 	fmt.Printf("Balance of '%s': %d\n", address, balance)
 }

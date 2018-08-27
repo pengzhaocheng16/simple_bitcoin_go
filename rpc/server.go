@@ -84,7 +84,7 @@ func (s *Server) RegisterName(name string, rcvr interface{}) error {
 	svc := new(service)
 	svc.typ = reflect.TypeOf(rcvr)
 	rcvrVal := reflect.ValueOf(rcvr)
-
+	//fmt.Println(" service name %s for type %s",name,svc.typ.String())
 	if name == "" {
 		return fmt.Errorf("no service name for type %s", svc.typ.String())
 	}
@@ -93,6 +93,8 @@ func (s *Server) RegisterName(name string, rcvr interface{}) error {
 	}
 
 	methods, subscriptions := suitableCallbacks(rcvrVal, svc.typ)
+	//fmt.Println(" service methods",methods)
+	//fmt.Println(" service subscriptions",subscriptions)
 
 	// already a previous service register under given sname, merge methods/subscriptions
 	if regsvc, present := s.services[name]; present {
@@ -189,6 +191,7 @@ func (s *Server) serveRequest(ctx context.Context, codec ServerCodec, singleShot
 		}
 		// If a single shot request is executing, run and return immediately
 		if singleShot {
+			fmt.Sprint("singleShot ")
 			if batch {
 				s.execBatch(ctx, codec, reqs)
 			} else {
@@ -198,6 +201,7 @@ func (s *Server) serveRequest(ctx context.Context, codec ServerCodec, singleShot
 		}
 		// For multi-shot connections, start a goroutine to serve and loop back
 		pend.Add(1)
+		fmt.Sprint("multi-shot ")
 
 		go func(reqs []*serverRequest, batch bool) {
 			defer pend.Done()
@@ -377,6 +381,7 @@ func (s *Server) execBatch(ctx context.Context, codec ServerCodec, requests []*s
 // error when the request could not be read/parsed.
 func (s *Server) readRequest(codec ServerCodec) ([]*serverRequest, bool, Error) {
 	reqs, batch, err := codec.ReadRequestHeaders()
+	println("codec.ReadRequestHeaders ",err)
 	if err != nil {
 		return nil, batch, err
 	}
@@ -403,7 +408,8 @@ func (s *Server) readRequest(codec ServerCodec) ([]*serverRequest, bool, Error) 
 			}
 			continue
 		}
-
+		println("r.service ",r.service)
+		fmt.Println(s.services)
 		if svc, ok = s.services[r.service]; !ok { // rpc method isn't available
 			requests[i] = &serverRequest{id: r.id, err: &methodNotFoundError{r.service, r.method}}
 			continue
@@ -427,6 +433,7 @@ func (s *Server) readRequest(codec ServerCodec) ([]*serverRequest, bool, Error) 
 			continue
 		}
 
+		println("r.method ",r.method)
 		if callb, ok := svc.callbacks[r.method]; ok { // lookup RPC method
 			requests[i] = &serverRequest{id: r.id, svcname: svc.name, callb: callb}
 			if r.params != nil && len(callb.argTypes) > 0 {

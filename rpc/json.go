@@ -296,7 +296,10 @@ func parsePositionalArguments(rawArgs json.RawMessage, types []reflect.Type) ([]
 			return nil, &invalidParamsError{fmt.Sprintf("too many arguments, want at most %d", len(types))}
 		}
 		argval := reflect.New(types[i])
+		fmt.Println("types i ",types[i])
+		fmt.Println("argval i ",argval)
 		if err := dec.Decode(argval.Interface()); err != nil {
+			fmt.Println("invalidParamsError! ",argval.Interface())
 			return nil, &invalidParamsError{fmt.Sprintf("invalid argument %d: %v", i, err)}
 		}
 		if argval.IsNil() && types[i].Kind() != reflect.Ptr {
