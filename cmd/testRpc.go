@@ -4,8 +4,11 @@ package main
 import (
 	"fmt"
 	"../rpc"
+	"../internal/swcapi"
 	"math/big"
+	"../blockchain_go"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func main() {
@@ -16,11 +19,12 @@ func main() {
 		return
 	}
 
-
 	var  blockNumber uint64
 	var  swc_coinbase string
 	var  clientversion string
 	var  block map[string]interface{}
+	var  txhash common.Hash
+	var  txhash1 common.Hash
 
 	err = client.Call(&blockNumber, "swc_blockNumber")
 	err = client.Call(&swc_coinbase, "swc_coinbase")
@@ -31,13 +35,41 @@ func main() {
 
 	var  balance = int64(0)
 
-	err = client.Call(&balance, "swc_getBalance","1NWUWL17WtxzSMVWhGm8UD7Y45ikFUHZCx")
+	err = client.Call(&balance, "swc_getBalance","1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5")
+
+	sendTx := new(swcapi.SendTxArgs)
+	sendTx1 := new(swcapi.SendTxArgs)
+	var from = core.Base58ToCommonAddress([]byte("1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5"))
+	var to = core.Base58ToCommonAddress([]byte("1G7EmF7Umd96FLMKh3PhqZCi3bfMzqC4tH"))
+	var from1 = core.Base58ToCommonAddress([]byte("1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5"))
+	var to1 = core.Base58ToCommonAddress([]byte("1Czy7TAfKMAFctBQV14t5KkeH3c2ptTcZA"))
+
+	var nonce = hexutil.Uint64(1)
+	var bigi = new(big.Int).SetInt64(10)
+	var value = (*hexutil.Big)(bigi)
+	var data = hexutil.Bytes{}
+	sendTx.From = from
+	sendTx.To = &to
+	sendTx.Nonce = &nonce
+	sendTx.Value = value
+	sendTx.Data = &data
+
+	sendTx1.From = from1
+	sendTx1.To = &to1
+	sendTx1.Nonce = &nonce
+	sendTx1.Value = value
+	sendTx1.Data = &data
+
+	err = client.Call(&txhash, "personal_sendTransaction",sendTx,"")
+	err = client.Call(&txhash1, "personal_sendTransaction",sendTx1,"")
 
 	fmt.Println("swc_blockNumber ", blockNumber)
 	fmt.Println("swc_coinbase ", swc_coinbase)
 	fmt.Println("web3_clientversion ", clientversion)
 	fmt.Println("swc_getBlockByNumber ", block)
 	fmt.Println("swc_getBalance ",balance )
+	fmt.Println("personal_sendTransaction ",txhash )
+	fmt.Println("personal_sendTransaction1 ",txhash1 )
 
 	/*var account[]string
 	err = client.Call(&account, "eth_accounts")

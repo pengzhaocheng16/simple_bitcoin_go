@@ -11,9 +11,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 const walletFile = "wallet_%s.dat"
+const walletStateFile = "wallet_state_%s.dat"
 const privKeyBytesLen = 32
 
 // Wallets stores a collection of wallets
@@ -78,9 +80,18 @@ func (ws Wallets) GetWallet(address string) Wallet {
 	return wallet
 }
 
+// GetWallet returns a Wallet by its address
+func (ws Wallets) GetWalletCommonAddress(address *common.Address) Wallet {
+	var addressStr = CommonAddressToBase58(address)
+	wallet := *ws.Wallets[addressStr]
+	prv,_ := crypto.ToECDSA(wallet.PrivateKey.D.Bytes())
+	wallet.PrivateKey = *prv
+	return wallet
+}
+
 // LoadFromFile loads wallets from the file
 func (ws *Wallets) LoadFromFile(nodeID string) error {
-	walletFile := genWalletDbName(nodeID)
+	walletFile := GenWalletDbName(nodeID)
 	if _, err := os.Stat(walletFile); os.IsNotExist(err) {
 		return err
 	}
@@ -108,17 +119,26 @@ func genWalletFileName(nodeID string)string{
 	return nodeID
 }
 
-func genWalletDbName(nodeID string)string{
+func GenWalletDbName(nodeID string)string{
 	nodeID = genWalletFileName(nodeID)
 	walletFile := fmt.Sprintf(walletFile, nodeID)
 
 	return walletFile
 }
 
+func GenWalletStateDbName(nodeID string)string{
+	nodeID = genWalletFileName(nodeID)
+	walletFile := fmt.Sprintf(walletStateFile, nodeID)
+
+	return walletFile
+}
+
+
+
 // SaveToFile saves wallets to a file
 func (ws Wallets) SaveToFile(nodeID string) {
 	var content bytes.Buffer
-	walletFile := genWalletDbName(nodeID)
+	walletFile := GenWalletDbName(nodeID)
 
 	//gob.Register(elliptic.P256())
 	gob.Register(crypto.S256())
@@ -134,7 +154,6 @@ func (ws Wallets) SaveToFile(nodeID string) {
 		log.Panic(err)
 	}
 }
-
 
 // used to turn private key to size bytes
 // paddedAppend appends the src byte slice to dst, returning the new slice.
@@ -156,4 +175,13 @@ func GetCurrPath() string {
 	splitstring = strings.Split(path, splitstring[size-1])
 	ret := strings.Replace(splitstring[0], "\\", "/", size-1)
 	return ret
+}
+
+func GetPoolNonce(nodeID,address string)(uint64,error){
+	var wt = new(WalletTransactions)
+	wt.InitDB(nodeID,address)
+	nonce,err := wt.GetTransactionNonce(address)
+	wt.DB.Close()
+	fmt.Println("===  after GetTransactionNonce: \n")
+	return nonce,err
 }

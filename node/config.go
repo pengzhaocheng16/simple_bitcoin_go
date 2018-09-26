@@ -408,10 +408,12 @@ func (c *Config) AccountConfig() (int, int, string, error) {
 func makeAccountManager(conf *Config) (*accounts.Manager, string, error) {
 	scryptN, scryptP, keydir, err := conf.AccountConfig()
 	var ephemeral string
+	println("---1" + keydir)
 	if keydir == "" {
 		// There is no datadir.
 		keydir, err = ioutil.TempDir("", "go-ethereum-keystore")
 		ephemeral = keydir
+		println("---2" + keydir)
 	}
 
 	if err != nil {

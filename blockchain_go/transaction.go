@@ -12,11 +12,11 @@ import (
 	"fmt"
 	"log"
 	"time"
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/common"
 	"sync/atomic"
 	"github.com/ethereum/go-ethereum/rlp"
-	"os"
 	."../boltqueue"
 )
 
@@ -29,10 +29,28 @@ type Transaction struct {
 	Vout []TXOutput
 	Timestamp     int64
 	size atomic.Value
+	data txdata
 }
 // Transactions is a Transaction slice type for basic sorting.
 type Transactions []*Transaction
 type writeCounter common.StorageSize
+
+type txdata struct {
+	AccountNonce uint64          `json:"nonce"    gencodec:"required"`
+	//Price        *big.Int        `json:"gasPrice" gencodec:"required"`
+	//GasLimit     uint64          `json:"gas"      gencodec:"required"`
+	Recipient    *common.Address `json:"to"       rlp:"nil"` // nil means contract creation
+	Amount       *big.Int        `json:"value"    gencodec:"required"`
+	Payload      []byte          `json:"input"    gencodec:"required"`
+
+	// Signature values
+	V *big.Int `json:"v" gencodec:"required"`
+	R *big.Int `json:"r" gencodec:"required"`
+	S *big.Int `json:"s" gencodec:"required"`
+
+	// This is only used when marshaling to JSON.
+	Hash *common.Hash `json:"hash" rlp:"-"`
+}
 
 func (c *writeCounter) Write(b []byte) (int, error) {
 	*c += writeCounter(len(b))
@@ -67,6 +85,14 @@ func (tx *Transaction) Hash() []byte {
 	hash = sha256.Sum256(txCopy.Serialize())
 
 	return hash[:]
+}
+
+// Hash returns the hash of the Transaction
+func (tx *Transaction) HashCommon() common.Hash {
+	var hash []byte
+	hash = tx.Hash()
+
+	return common.BytesToHash(hash)
 }
 
 // Sign signs each input of a Transaction
@@ -140,7 +166,7 @@ func (tx *Transaction) TrimmedCopy() Transaction {
 
 	var v = atomic.Value{}
 	v.Store(common.StorageSize(0))
-	txCopy := Transaction{tx.ID, inputs, outputs,tx.Timestamp,tx.size}
+	txCopy := Transaction{tx.ID, inputs, outputs,tx.Timestamp,tx.size,tx.data}
 	tx.SetSize(uint64(len(tx.Serialize())))
 	//txCopy.size.Store(tx.Size())
 
@@ -192,7 +218,7 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
 }
 
 // NewCoinbaseTX creates a new coinbase transaction
-func NewCoinbaseTX(to, data string) *Transaction {
+func NewCoinbaseTX(to, data,nodeID string) *Transaction {
 	if data == "" {
 		randData := make([]byte, subsidy)
 		_, err := rand.Read(randData)
@@ -204,10 +230,35 @@ func NewCoinbaseTX(to, data string) *Transaction {
 	}
 
 	txin := TXInput{[]byte{}, -1, nil, []byte(data)}
-	txout := NewTXOutput(subsidy, to)
+	txout := NewTXOutput(big.NewInt(subsidy), to)
 	var v = atomic.Value{}
 	v.Store(common.StorageSize(0))
-	tx := Transaction{nil, []TXInput{txin}, []TXOutput{*txout}, time.Now().Unix(),v}
+
+	//prepare tx data
+	var toa = Base58ToCommonAddress([]byte(to))
+	//coinbase tx no from address
+	address := toa.String()
+	var wt = new(WalletTransactions)
+	wt.InitDB(nodeID,address)
+	nonce,err := wt.GetTransactionNonce(address)
+	wt.DB.Close()
+	if(err!=nil){
+		log.Panic(err)
+	}
+	d := txdata{
+		AccountNonce: nonce,
+		Recipient:    &toa,
+		Payload:     make([]byte, 0) ,
+		Amount:       new(big.Int),
+		//GasLimit:     gasLimit,
+		//Price:        new(big.Int),
+		V:            new(big.Int),
+		R:            new(big.Int),
+		S:            new(big.Int),
+	}
+	d.Amount.Set(big.NewInt(subsidy))
+
+	tx := Transaction{nil, []TXInput{txin}, []TXOutput{*txout}, time.Now().Unix(),v,d}
 	tx.ID = tx.Hash()
 	tx.SetSize(uint64(len(tx.Serialize())))
 
@@ -215,14 +266,14 @@ func NewCoinbaseTX(to, data string) *Transaction {
 }
 
 // NewUTXOTransaction creates a new transaction
-func NewUTXOTransaction(wallet *Wallet, to string, amount int, UTXOSet *UTXOSet) *Transaction {
+func NewUTXOTransaction(wallet *Wallet, to string, amount *big.Int,data []byte, UTXOSet *UTXOSet,nodeID string) *Transaction {
+	pubKeyHash := HashPubKey(wallet.PublicKey)
 	var inputs []TXInput
 	var outputs []TXOutput
 
-	pubKeyHash := HashPubKey(wallet.PublicKey)
 	acc, validOutputs := UTXOSet.FindSpendableOutputs(pubKeyHash, amount,false,nil)
 
-	if acc < amount {
+	if acc < amount.Uint64() {
 		log.Panic("ERROR: Not enough funds")
 	}
 
@@ -241,16 +292,44 @@ func NewUTXOTransaction(wallet *Wallet, to string, amount int, UTXOSet *UTXOSet)
 	// Build a list of outputs
 	from := fmt.Sprintf("%s", wallet.GetAddress())
 	outputs = append(outputs, *NewTXOutput(amount, to))
-	if acc > amount {
-		outputs = append(outputs, *NewTXOutput(acc-amount, from)) // a change
+	if acc > amount.Uint64() {
+		outputs = append(outputs, *NewTXOutput(big.NewInt(int64(acc-amount.Uint64())), from)) // a change
 	}
 
+	//prepare tx data
+	address := common.BytesToAddress(pubKeyHash).String()
+	var wt = new(WalletTransactions)
+	wt.InitDB(nodeID,address)
+	nonce,err := wt.GetTransactionNonce(address)
+	wt.DB.Close()
+	if(err!=nil){
+		log.Panic(err)
+	}
+	var toa = Base58ToCommonAddress([]byte(to))
+	d := txdata{
+		AccountNonce: nonce,
+		Recipient:    &toa,
+		Payload:      data,
+		Amount:       new(big.Int),
+		//GasLimit:     gasLimit,
+		//Price:        new(big.Int),
+		V:            new(big.Int),
+		R:            new(big.Int),
+		S:            new(big.Int),
+	}
+	if amount.Uint64() != 0 {
+		d.Amount.Set(amount)
+	}
+
+	//sign transaction
 	var v = atomic.Value{}
 	v.Store(common.StorageSize(0))
-	tx := Transaction{nil, inputs, outputs, time.Now().Unix(),v}
+	tx := Transaction{nil, inputs, outputs, time.Now().Unix(),v,d}
 	tx.ID = tx.Hash()
 	tx.SetSize(uint64(len(tx.Serialize())))
-	UTXOSet.Blockchain.SignTransaction(&tx, wallet.PrivateKey)
+	//UTXOSet.Blockchain.SignTransaction(&tx, wallet.PrivateKey)
+	account := accounts.Account{Address: wallet.ToCommonAddress()}
+	wallet.SignTxWithPassphrase(account,"",&tx,nil,nodeID,UTXOSet.Blockchain)
 
 	return &tx
 }
@@ -318,18 +397,32 @@ func (tx *Transaction) SetSize(c uint64) common.StorageSize {
 	return  common.StorageSize(c)
 }
 
-func PendingIn(wallet Wallet,tx *Transaction){
-	queueFile := fmt.Sprintf("%x_tx.db", wallet.GetAddress())
+func PendingIn(chainId string,tx *Transaction){
+	//queueFile := fmt.Sprintf("%x_tx.db", wallet.GetAddress())
+	queueFile := GenWalletStateDbName(chainId)
+	//fmt.Printf("===af GenWalletStateDbName  \n")
+	if dbExists(dbFile) {
+		fmt.Println("wallet transaction file already exists.PendingIn")
+		//os.Exit(1)
+	}
+	//fmt.Printf("===bf NewPQueue  \n")
 	txPQueue, err := NewPQueue(queueFile)
 	if err != nil {
 		log.Panic("create queue error",err)
 	}
 	//defer txPQueue.Close()
-	defer os.Remove(queueFile)
-	eqerr := txPQueue.Enqueue(1, NewMessageBytes(tx.Vin[0].Txid))
-	if err != nil {
-		log.Panic("Enqueue error",eqerr)
+	//defer os.Remove(queueFile)
+	//fmt.Printf("===bf SetMsg  \n")
+	for _,vin := range tx.Vin{
+		//fmt.Printf("===in SetMsg  \n")
+		eqerr := txPQueue.SetMsg(1, tx.ID,vin.Txid)
+		txPQueue.SetMsg(2,tx.ID,tx.ID)
+		txPQueue.SetMsg(3,tx.ID,tx.Serialize())
+		if eqerr != nil {
+			log.Panic("Enqueue error",eqerr)
+		}
 	}
+	//fmt.Printf("===af SetMsg  \n")
 	txPQueue.Close()
 }
 
@@ -365,3 +458,73 @@ func VerifyTx(tx Transaction,bc *Blockchain)bool{
 	}
 }
 
+// TxByNonce implements the sort interface to allow sorting a list of transactions
+// by their nonces. This is usually only useful for sorting transactions from a
+// single account, otherwise a nonce comparison doesn't make much sense.
+type TxByNonce Transactions
+
+func (s TxByNonce) Len() int           { return len(s) }
+func (s TxByNonce) Less(i, j int) bool { return s[i].data.AccountNonce < s[j].data.AccountNonce }
+func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+
+/**
+	new transaction to sign
+ */
+func NewTransaction(wallet Wallet,nonce uint64,to *common.Address,amount *big.Int,input []byte,nodeID string)*Transaction{
+	var bc = NewBlockchain(nodeID)
+	uTXOSet := UTXOSet{bc}
+
+	pubKeyHash := HashPubKey(wallet.PublicKey)
+	var inputs []TXInput
+	var outputs []TXOutput
+
+	acc, validOutputs := uTXOSet.FindSpendableOutputs(pubKeyHash, amount,false,nil)
+	bc.Db.Close()
+
+	if acc < amount.Uint64() {
+		log.Panic("ERROR: Not enough funds")
+	}
+
+	// Build a list of inputs
+	for txid, outs := range validOutputs {
+		txID, err := hex.DecodeString(txid)
+		if err != nil {
+			log.Panic(err)
+		}
+		for _, out := range outs {
+			input := TXInput{txID, out, nil, wallet.PublicKey}
+			inputs = append(inputs, input)
+		}
+	}
+
+	// Build a list of outputs
+	from := fmt.Sprintf("%s", wallet.GetAddress())
+	outputs = append(outputs, *NewTXOutput(amount, CommonAddressToBase58(to)))
+	if acc > amount.Uint64() {
+		outputs = append(outputs, *NewTXOutput(big.NewInt(int64(acc-amount.Uint64())), from)) // a change
+	}
+
+	d := txdata{
+		AccountNonce: nonce,
+		Recipient:    to ,
+		Payload:      input,
+		Amount:       amount,
+		//GasLimit:     gasLimit,
+		//Price:        new(big.Int),
+		V:            new(big.Int),
+		R:            new(big.Int),
+		S:            new(big.Int),
+	}
+
+	//build a transaction
+	var v = atomic.Value{}
+	v.Store(common.StorageSize(0))
+	tx := Transaction{nil, inputs, outputs, time.Now().Unix(),v,d}
+	tx.ID = tx.Hash()
+	tx.SetSize(uint64(len(tx.Serialize())))
+	//uTXOSet.Blockchain.SignTransaction(&tx, wallet.PrivateKey)
+
+	fmt.Printf("===after build transaction %x \n", tx.ID)
+
+	return &tx
+}

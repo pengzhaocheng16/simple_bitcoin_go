@@ -38,7 +38,7 @@ const txsyncPackSize = 100 * 1024
 
 var nodeAddress string
 var miningAddress string
-var BootNodes = []string{"192.168.43.134:2000"}
+var BootNodes = []string{"192.168.43.43:2000"}
 var BootPeers = []*discover.Node{}
 var CurrentNodeInfo *p2p.NodeInfo
 var blocksInTransit = [][]byte{}
@@ -368,6 +368,16 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 	if( valid ){
 		if(!p.knownBlocks.Has(hex.EncodeToString(block.Hash.Bytes()))){
 			bc.AddBlock(block)
+			//confirm transaction from wallet
+			//wallets1, err := core.NewWallets(bc.NodeId)
+			//if err != nil {
+			//	log.Panic(err)
+			//}
+			//walletaddrs1 := wallets1.GetAddresses()
+			//for _,walletAddress := range walletaddrs1{
+				confirmTx(block,bc.NodeId)
+			//}
+
 			p.lock.RLock()
 			//Manager.CurrTd = block.Height
 			p.knownBlocks.Add(hex.EncodeToString(block.Hash.Bytes()))
@@ -613,7 +623,7 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 			}
 
 			fmt.Println("==>NewCoinbaseTX ")
-			cbTx := core.NewCoinbaseTX(miningAddress, "")
+			cbTx := core.NewCoinbaseTX(miningAddress, "",bc.NodeId)
 			txs = append(txs, cbTx)
 
 			newBlock := bc.MineBlock(txs)
@@ -822,15 +832,15 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 		nodeIDs := dotray.QueryNodes(10)
 		fmt.Println("query nodes:", nodeIDs)
 	*/
-	 wallets, err := core.NewWallets("192.168.43.134:2000")
+	 wallets, err := core.NewWallets("192.168.43.43:2000")
 	 if err != nil {
 		 log.Panic(err)
 	 }
 	 walletaddrs := wallets.GetAddresses()
 	 wallet := wallets.GetWallet(walletaddrs[0])
 	 var peers []*discover.Node
-	 if(nodeID!="192.168.43.134:2000"){
-	 	peers = []*discover.Node{&discover.Node{IP: net.ParseIP("192.168.43.134"),TCP:2000,UDP:2000,ID: discover.PubkeyID(&wallet.PrivateKey.PublicKey)}}
+	 if(nodeID!="192.168.43.43:2000"){
+	 	peers = []*discover.Node{&discover.Node{IP: net.ParseIP("192.168.43.43"),TCP:2000,UDP:2000,ID: discover.PubkeyID(&wallet.PrivateKey.PublicKey)}}
 	 }else{
 	 	peers = nil
 	 }
@@ -884,6 +894,7 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 		HTTPPort:port,
 		HTTPCors:[]string{"*"},
 		HTTPVirtualHosts:[]string{"localhost"},
+		KeyStoreDir:"",
 	}
 	stack, err := node.New(conf)
 	// Register a batch of life-cycle instrumented services
@@ -1164,7 +1175,7 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 	}
 
 	defer versionPQueue.Close()
-	defer os.Remove(queueFile)
+	//defer os.Remove(queueFile)
 
 	// Dequeue history versiondata and sent version to the peer
 	//for size,err1 := versionPQueue.Size(1);err1 == nil && size > 0;{
@@ -1193,40 +1204,65 @@ func enqueueVersion(myLastHash []byte){
 	}
 
 	defer versionPQueue.Close()
-	defer os.Remove(queueFile)
+	//defer os.Remove(queueFile)
 	eqerr := versionPQueue.Enqueue(1, NewMessageBytes(myLastHash))
 	if err != nil {
 		log.Panic("Version myLastHash Enqueue error",eqerr)
 	}
 }
 
-func confirmTx(newblock core.Block,wallet core.Wallet) bool {
-	queueFile := fmt.Sprintf("%x_tx.db", wallet.GetAddress())
+//confirm transaction from wallet (not tranasaction from other node)
+//TODO if there is blockchain conflict (blockchain fork) then the data is not valid need to delete all comfirmed uncomfirmed transactions
+func confirmTx(newblock *core.Block,chainId string) bool {
+	//queueFile := fmt.Sprintf("%x_tx.db", wallet.GetAddress())
+	queueFile := core.GenWalletStateDbName(chainId)
 	txPQueue, err := NewPQueue(queueFile)
 	if err != nil {
 		log.Panic("create queue error", err)
 	}
 	defer txPQueue.Close()
-	defer os.Remove(queueFile)
+
+	//defer os.Remove(queueFile)
 	// priority 1 msg: spent utxo transaction id
 	// priority 2 msg: comfirmation counter + tx block hash +  user's pending transaction id
 	//loop block's txs if block's tx exist in queue then tx's confirmationCount +1
 	//if confirmationCount == 6 remove priority 2 tx data:tx id and 1 tx data:tx's vin txid
-	var txid *Message
-	var counter []byte
-	var iddata []byte
-	for _, tx := range newblock.Transactions {
-		txid = txPQueue.GetMsg(2, tx.ID, 193)
 
-		if (txid != nil) {
-			counter = txid.Bytes()[:1]
-			iddata = txid.Bytes()[1:]
+	//transaction in first confirmed block
+	for _, tx := range newblock.Transactions {
+		var txid *Message
+		var counter []byte
+		txid = txPQueue.GetMsgBykey(2, tx.ID)
+
+		if (txid != nil && txid.Bytes() != nil ) {
+			counter = make([]byte,1)
+			// counter  =  1
+			counter[0] = 1
+			// confirmation’s block hash 32 * 6 =192 bytes
+			var blockHash = make([]byte,0)
+			blockHash = append(blockHash[:], newblock.Hash.Bytes()...)
+			fmt.Printf("  blockHash %d :\n", blockHash)
+			var newiddata = make([]byte,0)
+			newiddata =append(newiddata,counter...)
+			newiddata =append(newiddata,blockHash...)
+			var zero = make([]byte,160)
+			newiddata =append(newiddata,zero...)
+			fmt.Printf("  newiddata %d :\n", newiddata)
+
+			fmt.Printf(" len newiddata %d :\n", len(newiddata))
+			txPQueue.DeleteMsg(2, txid.Bytes())
+			txPQueue.SetMsg(2, txid.Bytes(),newiddata )
 		}
 	}
+	//transaction not in first confirmed block
+	var counter []byte
+	var iddata []byte
 	var txidold []byte
+	var bytelen int
 	vall := txPQueue.GetAll(2)
 	for _, txiddata0 := range vall {
-		txiddata := txiddata0[1:193]
+		fmt.Printf(" len newiddata0 %d :\n", txiddata0)
+		txiddata := txiddata0.Bytes()[1:192]
 
 		hash1 := hex.EncodeToString(txiddata[:32])
 		hash2 := hex.EncodeToString(txiddata[32:64])
@@ -1236,34 +1272,55 @@ func confirmTx(newblock core.Block,wallet core.Wallet) bool {
 		hash6 := hex.EncodeToString(txiddata[160:192])
 		switch hex.EncodeToString(newblock.PrevBlockHash.Bytes()) {
 		case hash1:
+			bytelen = 32
+			txidold = txiddata0.Key()
+			break;
 		case hash2:
+			bytelen = 64
+			txidold = txiddata0.Key()
+			break;
 		case hash3:
+			bytelen = 96
+			txidold = txiddata0.Key()
 		case hash4:
+			bytelen = 128
+			txidold = txiddata0.Key()
 		case hash5:
+			bytelen = 160
+			txidold = txiddata0.Key()
 		case hash6:
-			txidold = txiddata0[193:]
+			bytelen = 192
+			txidold = txiddata0.Key()
 			break
-
 		}
 		if (txidold != nil) {
-			counter = txiddata0[:1]
-			iddata = txidold
+			counter = txiddata0.Bytes()[:1]
+			iddata = txiddata
 		}
 	}
 
-	if (txid != nil||txidold!=nil) {
+	if (txidold!=nil) {
 		// counter + 1 1 byte
 		counter[0] = counter[0] + 1
 		// confirmation’s block hash 32 * 6 =192 bytes
-		var blockHash= []byte{}
-		blockHash = append(blockHash, newblock.Hash.Bytes()...)
-
-		newtxid := append(counter, blockHash...)
-		newtxid = append(counter, iddata...)
+		var blockHash= make([]byte,(192-bytelen))
+		blockHash = append(blockHash[:], newblock.Hash.Bytes()...)
+		var newhash []byte
+		for _, v := range blockHash {
+			newhash = append(counter, v)
+		}
+		newhash = append(iddata[:bytelen],newhash ...)
 		if (counter[0] == 6) {
-			txPQueue.DeleteMsg(2, newtxid, 193)
+			txPQueue.DeleteMsg(2, txidold)
+			txMsg := txPQueue.GetMsgBykey(3,txidold)
+			txSerialized := txMsg.Bytes()
+			tx := core.DeserializeTransaction(txSerialized)
+			for _,vin := range tx.Vin{
+				txPQueue.DeleteMsg(1,vin.Txid)
+			}
+			txPQueue.DeleteMsg(3,txidold)
 		} else {
-			txPQueue.SetMsg(2, newtxid, 193)
+			txPQueue.SetMsg(2, txidold, newhash)
 		}
 	}
 	return false

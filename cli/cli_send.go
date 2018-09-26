@@ -7,6 +7,7 @@ import (
 	"../p2pprotocol"
 	"time"
 	"encoding/hex"
+	"math/big"
 )
 
 func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
@@ -34,11 +35,10 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 	}
 	wallet := wallets.GetWallet(from)
 
-	tx := core.NewUTXOTransaction(&wallet, to, amount, &UTXOSet)
-
+	tx := core.NewUTXOTransaction(&wallet, to, big.NewInt(int64(amount)),[]byte{}, &UTXOSet,nodeID)
 
 	if mineNow {
-		cbTx := core.NewCoinbaseTX(from, "")
+		cbTx := core.NewCoinbaseTX(from, "",nodeID)
 		txs := []*core.Transaction{cbTx, tx}
 
 		newBlock := bc.MineBlock(txs)
@@ -46,9 +46,15 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 		bc.Db.Close()
 	} else {
 		bc.Db.Close()
-		//TODO remove comfirmed transaction from persistent tx queue
+		//remove comfirmed transaction vin txs from persistent tx queue
+		// in confirmTx()
 		//In case of double spend check fail need to store prev uncomfirmed transaction input tx
-		core.PendingIn(wallet,tx)
+		core.PendingIn(nodeID,tx)
+		address := wallet.ToCommonAddress().String()
+		var wt = new(core.WalletTransactions)
+		wt.InitDB(nodeID,address)
+		wt.PutTransaction(tx.ID,tx.Serialize(),address)
+		wt.DB.Close()
 		go func(){
 			if(p2pprotocol.CurrentNodeInfo == nil){
 				p2pprotocol.StartServer(nodeID,"","","",0)
@@ -105,7 +111,7 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 			bc = core.NewBlockchain(nodeID)
 			UTXOSet := core.UTXOSet{bc}
 			log.Println("--send to",toaddress)
-			tx := core.NewUTXOTransaction(&wallet, toaddress, amountnum, &UTXOSet)
+			tx := core.NewUTXOTransaction(&wallet, toaddress, big.NewInt(int64(amountnum)), []byte{},&UTXOSet,nodeID)
 			for _, p := range p2pprotocol.Manager.Peers.Peers {
 				p2pprotocol.SendTx(p, p.Rw, tx)
 			}

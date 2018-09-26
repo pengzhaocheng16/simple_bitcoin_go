@@ -2,7 +2,6 @@ package core
 
 import (
 	"bytes"
-	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -28,6 +27,7 @@ type Blockchain struct {
 	GenesisHash common.Hash
 	tip common.Hash
 	Db  *bolt.DB
+	NodeId string
 }
 
 func genBlockChainDbName(nodeID string)string{
@@ -49,7 +49,7 @@ func CreateBlockchain(address, nodeID string) *Blockchain {
 	var tip common.Hash
 	var genesisHash common.Hash
 
-	cbtx := NewCoinbaseTX(address, genesisCoinbaseData)
+	cbtx := NewCoinbaseTX(address, genesisCoinbaseData,nodeID)
 	genesis := NewGenesisBlock(cbtx)
 
 	db, err := bolt.Open(dbFile, 0600, nil)
@@ -86,7 +86,7 @@ func CreateBlockchain(address, nodeID string) *Blockchain {
 	}
 	rawdb.WriteCanonicalHash(db,genesis.Hash,0)
 
-	bc := Blockchain{genesisHash,tip, db}
+	bc := Blockchain{genesisHash,tip, db,nodeID}
 	return &bc
 }
 
@@ -117,7 +117,7 @@ func NewBlockchain(nodeID string) *Blockchain {
 		log.Panic(err)
 	}
 
-	bc := Blockchain{genesisHash,tip, db}
+	bc := Blockchain{genesisHash,tip, db,nodeID}
 
 	return &bc
 }
@@ -385,7 +385,7 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) *Block {
 
 	return newBlock
 }
-
+/*
 // SignTransaction signs inputs of a Transaction
 func (bc *Blockchain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateKey) {
 	prevTXs := make(map[string]Transaction)
@@ -399,7 +399,7 @@ func (bc *Blockchain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateKey)
 	}
 
 	tx.Sign(privKey, prevTXs)
-}
+}*/
 
 // VerifyTransaction verifies transaction input signatures
 func (bc *Blockchain) VerifyTransaction(tx *Transaction) bool {
@@ -495,8 +495,9 @@ func (bc *Blockchain)IsBlockValid(newBlock *Block) (bool,int) {
 
 	//transaction consistent validate
 	UTXOSet := UTXOSet{bc}
-	if(!UTXOSet.VerifyTxTimeLineAndUTXOAmount(oldBlock.Timestamp,newBlock)){
-		reason = 6
+	valid,reason := UTXOSet.VerifyTxTimeLineAndUTXOAmount(oldBlock.Timestamp,newBlock)
+	if(!valid){
+		//reason = 6
 		return false,reason
 	}
 	for _,tx := range newBlock.Transactions{

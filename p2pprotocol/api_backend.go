@@ -8,6 +8,12 @@ import (
 	"../rpc"
 	"fmt"
 	"math/big"
+	"github.com/ethereum/go-ethereum/common"
+
+
+
+	"encoding/hex"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 //import "github.com/ethereum/go-ethereum/eth/gasprice"
@@ -18,10 +24,10 @@ type SwcAPIBackend struct {
 	//gpo *gasprice.Oracle
 }
 
-/*
+
 func (b *SwcAPIBackend) ChainConfig() *params.ChainConfig {
 	return b.swc.chainConfig
-}*/
+}
 
 func (b *SwcAPIBackend) CurrentBlock() *core.Block {
 	return b.swc.blockchain.CurrentBlock()
@@ -147,11 +153,20 @@ func (b *SwcAPIBackend) GetBalance(ctx context.Context, address string) (int64, 
 	func (b *SwcAPIBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
 		return b.swc.BlockChain().SubscribeLogsEvent(ch)
 	}
+*/
+	func (b *SwcAPIBackend) SendTx(ctx context.Context, signedTx *core.Transaction) error {
+		for _, p := range Manager.Peers.Peers {
+			SendTx(p, p.Rw, signedTx)
+		}
+		//TODO pool lock mangement
+		Manager.mu.Lock()
+		defer Manager.mu.Unlock()
 
-	func (b *SwcAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
-		return b.swc.txPool.AddLocal(signedTx)
+		Manager.TxMempool[hex.EncodeToString(signedTx.ID)] = signedTx
+		// return b.swc.txPool.AddLocal(signedTx)
+		return nil
 	}
-
+/*
 	func (b *SwcAPIBackend) GetPoolTransactions() (types.Transactions, error) {
 		pending, err := b.swc.txPool.Pending()
 		if err != nil {
@@ -167,11 +182,16 @@ func (b *SwcAPIBackend) GetBalance(ctx context.Context, address string) (int64, 
 	func (b *SwcAPIBackend) GetPoolTransaction(hash common.Hash) *types.Transaction {
 		return b.swc.txPool.Get(hash)
 	}
-
+*/
 	func (b *SwcAPIBackend) GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error) {
-		return b.swc.txPool.State().GetNonce(addr), nil
+		//return b.swc.txPool.State().GetNonce(addr), nil
+		return core.GetPoolNonce(b.swc.nodeID,addr.String())
 	}
 
+	func (b *SwcAPIBackend) GetNodeId() string{
+		return b.swc.nodeID
+	}
+/*
 	func (b *SwcAPIBackend) Stats() (pending int, queued int) {
 		return b.swc.txPool.Stats()
 	}

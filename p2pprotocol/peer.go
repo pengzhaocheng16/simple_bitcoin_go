@@ -127,6 +127,8 @@ type ProtocolManager struct {
 	TxMempool map[string]*core.Transaction
 	BigestTd *big.Int
 	BestTd chan *big.Int
+
+	mu           sync.RWMutex
 	//CurrTd *big.Int
 }
 

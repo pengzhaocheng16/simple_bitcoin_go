@@ -21,6 +21,8 @@ import (
 	"context"
 	"../../blockchain_go"
 	"../../rpc"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // Backend interface provides the common API services (that are provided by
@@ -47,22 +49,26 @@ type Backend interface {
 	SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription
 	SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription
 	SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) event.Subscription
-
+*/
 	// TxPool API
-	SendTx(ctx context.Context, signedTx *types.Transaction) error
+	SendTx(ctx context.Context, signedTx *core.Transaction) error
+	/*
 	GetPoolTransactions() (types.Transactions, error)
 	GetPoolTransaction(txHash common.Hash) *types.Transaction
-	GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error)
+	*/
+	GetPoolNonce(ctx context.Context,addr common.Address) (uint64, error)
+	GetNodeId()string
+	/*
 	Stats() (pending int, queued int)
 	TxPoolContent() (map[common.Address]types.Transactions, map[common.Address]types.Transactions)
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
-*//*
-	ChainConfig() *params.ChainConfig*/
+*/
+	ChainConfig() *params.ChainConfig
 	CurrentBlock() *core.Block
 }
 
 func GetAPIs(apiBackend Backend) []rpc.API {
-	//nonceLock := new(AddrLocker)
+	nonceLock := new(AddrLocker)
 	return []rpc.API{
 		{
 			Namespace: "swc",
@@ -74,7 +80,7 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 			Version:   "1.0",
 			Service:   NewPublicBlockChainAPI(apiBackend),
 			Public:    true,
-		}, /*{
+		}, {
 			Namespace: "eth",
 			Version:   "1.0",
 			Service:   NewPublicTransactionPoolAPI(apiBackend, nonceLock),
@@ -84,7 +90,7 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 			Version:   "1.0",
 			Service:   NewPublicTxPoolAPI(apiBackend),
 			Public:    true,
-		}, {
+		},/* {
 			Namespace: "debug",
 			Version:   "1.0",
 			Service:   NewPublicDebugAPI(apiBackend),
@@ -98,11 +104,12 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 			Version:   "1.0",
 			Service:   NewPublicAccountAPI(apiBackend.AccountManager()),
 			Public:    true,
-		}, {
+		}, */{
 			Namespace: "personal",
 			Version:   "1.0",
 			Service:   NewPrivateAccountAPI(apiBackend, nonceLock),
-			Public:    false,
-		},*/
+			//Public:    false,
+			Public:    true,
+		},
 	}
 }

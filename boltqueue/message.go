@@ -32,3 +32,8 @@ func (m *Message) ToString() string {
 func (m *Message) Bytes() []byte {
 	return m.value
 }
+
+// ToString outputs the string representation of the message's value
+func (m *Message) Key() []byte {
+	return m.key
+}

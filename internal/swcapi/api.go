@@ -19,13 +19,13 @@ package swcapi
 import (
 	//"bytes"
 	"context"
+	"errors"
 
 
 	//"strings"
 	//"time"
 
 	/*"github.com/davecgh/go-spew/spew"
-	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -36,16 +36,21 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
-	"../../p2p"*/
+	*/
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	//"../../p2p"
 	//"github.com/ethereum/go-ethereum/rlp"
 	"../../rpc"
 	"../../blockchain_go"
 	//"github.com/syndtr/goleveldb/leveldb"
 	//"github.com/syndtr/goleveldb/leveldb/util"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"fmt"
+	"math/big"
+	"bytes"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 const (
@@ -133,15 +138,19 @@ func NewPublicTxPoolAPI(b Backend) *PublicTxPoolAPI {
 	}
 	return content
 }
-
+*/
 // Status returns the number of pending and queued transaction in the pool.
 func (s *PublicTxPoolAPI) Status() map[string]hexutil.Uint {
-	pending, queue := s.b.Stats()
+	/*pending, queue := s.b.Stats()
 	return map[string]hexutil.Uint{
 		"pending": hexutil.Uint(pending),
 		"queued":  hexutil.Uint(queue),
+	}*/
+	return map[string]hexutil.Uint{
+		"pending": 1,
+		"queued":  2,
 	}
-}*/
+}
 
 // Inspect retrieves the content of the transaction pool and flattens it into an
 // easily inspectable list.
@@ -199,12 +208,12 @@ func (s *PublicAccountAPI) Accounts() []common.Address {
 	}
 	return addresses
 }
-
+*/
 // PrivateAccountAPI provides an API to access accounts managed by this node.
 // It offers methods to create, (un)lock en list accounts. Some methods accept
 // passwords and are therefore considered private by default.
 type PrivateAccountAPI struct {
-	am        *accounts.Manager
+	//am        *accounts.Manager
 	nonceLock *AddrLocker
 	b         Backend
 }
@@ -212,12 +221,12 @@ type PrivateAccountAPI struct {
 // NewPrivateAccountAPI create a new PrivateAccountAPI.
 func NewPrivateAccountAPI(b Backend, nonceLock *AddrLocker) *PrivateAccountAPI {
 	return &PrivateAccountAPI{
-		am:        b.AccountManager(),
+		//am:        b.AccountManager(),
 		nonceLock: nonceLock,
 		b:         b,
 	}
 }
-
+/*
 // ListAccounts will return a list of addresses for accounts this node manages.
 func (s *PrivateAccountAPI) ListAccounts() []common.Address {
 	addresses := make([]common.Address, 0) // return [] instead of nil if empty
@@ -336,35 +345,52 @@ func (s *PrivateAccountAPI) UnlockAccount(addr common.Address, password string, 
 func (s *PrivateAccountAPI) LockAccount(addr common.Address) bool {
 	return fetchKeystore(s.am).Lock(addr) == nil
 }
-
+*/
 // signTransactions sets defaults and signs the given transaction
 // NOTE: the caller needs to ensure that the nonceLock is held, if applicable,
 // and release it after the transaction has been submitted to the tx pool
-func (s *PrivateAccountAPI) signTransaction(ctx context.Context, args SendTxArgs, passwd string) (*types.Transaction, error) {
+func (s *PrivateAccountAPI) signTransaction(ctx context.Context, args SendTxArgs, passwd string) (*core.Transaction, error) {
 	// Look up the wallet containing the requested signer
 	account := accounts.Account{Address: args.From}
-	wallet, err := s.am.Find(account)
+	/*wallet, err := s.am.Find(account)
 	if err != nil {
 		return nil, err
+	}*/
+	wallets, err := core.NewWallets(s.b.GetNodeId())
+	if err != nil {
+		return nil,err
 	}
+	wallet := wallets.GetWallet(core.CommonAddressToBase58(&args.From))
+
 	// Set some sanity defaults and terminate on failure
 	if err := args.setDefaults(ctx, s.b); err != nil {
 		return nil, err
 	}
+	//fmt.Printf("===bf toTransaction  \n")
 	// Assemble the transaction and sign with the wallet
-	tx := args.toTransaction()
+	tx := args.toTransaction(wallet,s.b)
 
-	var chainID *big.Int
-	if config := s.b.ChainConfig(); config.IsEIP155(s.b.CurrentBlock().Number()) {
+	//fmt.Printf("===af toTransaction tx  \n")
+	//In case of double spend check fail need to store prev uncomfirmed transaction input tx
+	core.PendingIn(s.b.GetNodeId(),tx)
+	//fmt.Printf("===af PendingIn tx  \n")
+
+	/*var chainID *big.Int
+	if config := s.b.ChainConfig(); config.IsEIP155(s.b.CurrentBlock().Height) {
 		chainID = config.ChainID
-	}
-	return wallet.SignTxWithPassphrase(account, passwd, tx, chainID)
+	}*/
+	nodeID := s.b.GetNodeId()
+	//return wallet.SignTxWithPassphrase(account, passwd, tx, chainID)
+	return wallet.SignTxWithPassphrase(account, passwd, tx, nil,nodeID,nil)
 }
 
 // SendTransaction will create a transaction from the given arguments and
 // tries to sign it with the key associated with args.To. If the given passwd isn't
 // able to decrypt the key it fails.
 func (s *PrivateAccountAPI) SendTransaction(ctx context.Context, args SendTxArgs, passwd string) (common.Hash, error) {
+	println("nonce ",args.Nonce)
+	println("from ",args.From.String())
+	println("to ",args.To.String())
 	if args.Nonce == nil {
 		// Hold the addresse's mutex around signing to prevent concurrent assignment of
 		// the same nonce to multiple accounts.
@@ -372,12 +398,13 @@ func (s *PrivateAccountAPI) SendTransaction(ctx context.Context, args SendTxArgs
 		defer s.nonceLock.UnlockAddr(args.From)
 	}
 	signed, err := s.signTransaction(ctx, args, passwd)
+	fmt.Println("===  after signTransaction: \n")
 	if err != nil {
 		return common.Hash{}, err
 	}
 	return submitTransaction(ctx, s.b, signed)
 }
-
+/*
 // SignTransaction will create a transaction from the given arguments and
 // tries to sign it with the key associated with args.To. If the given passwd isn't
 // able to decrypt the key it fails. The transaction is returned in RLP-form, not broadcast
@@ -938,18 +965,18 @@ func newRPCTransactionFromBlockHash(b *types.Block, hash common.Hash) *RPCTransa
 	}
 	return nil
 }
+*/
 
 // PublicTransactionPoolAPI exposes methods for the RPC interface
 type PublicTransactionPoolAPI struct {
 	b         Backend
 	nonceLock *AddrLocker
 }
-
 // NewPublicTransactionPoolAPI creates a new RPC service with methods specific for the transaction pool.
 func NewPublicTransactionPoolAPI(b Backend, nonceLock *AddrLocker) *PublicTransactionPoolAPI {
 	return &PublicTransactionPoolAPI{b, nonceLock}
 }
-
+/*
 // GetBlockTransactionCountByNumber returns the number of transactions in the block with the given block number.
 func (s *PublicTransactionPoolAPI) GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) *hexutil.Uint {
 	if block, _ := s.b.BlockByNumber(ctx, blockNr); block != nil {
@@ -1079,17 +1106,17 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 		fields["root"] = hexutil.Bytes(receipt.PostState)
 	} else {
 		fields["status"] = hexutil.Uint(receipt.Status)
-	}
-	if receipt.Logs == nil {
-		fields["logs"] = [][]*types.Log{}
-	}
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
+	if receipt.Logs == nil {
+		fields["logs"] = [][]*types.Log{}
+	}
+	}
 	return fields, nil
 }
-
+*//*
 // sign is a helper function that signs a transaction with the private key of the given address.
 func (s *PublicTransactionPoolAPI) sign(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
 	// Look up the wallet containing the requested signer
@@ -1105,25 +1132,25 @@ func (s *PublicTransactionPoolAPI) sign(addr common.Address, tx *types.Transacti
 		chainID = config.ChainID
 	}
 	return wallet.SignTx(account, tx, chainID)
-}
+}*/
 
 // SendTxArgs represents the arguments to sumbit a new transaction into the transaction pool.
 type SendTxArgs struct {
 	From     common.Address  `json:"from"`
 	To       *common.Address `json:"to"`
-	Gas      *hexutil.Uint64 `json:"gas"`
-	GasPrice *hexutil.Big    `json:"gasPrice"`
+	/*Gas      *hexutil.Uint64 `json:"gas"`
+	GasPrice *hexutil.Big    `json:"gasPrice"`*/
 	Value    *hexutil.Big    `json:"value"`
 	Nonce    *hexutil.Uint64 `json:"nonce"`
 	// We accept "data" and "input" for backwards-compatibility reasons. "input" is the
 	// newer name and should be preferred by clients.
 	Data  *hexutil.Bytes `json:"data"`
 	Input *hexutil.Bytes `json:"input"`
+	B *Backend
 }
-
 // setDefaults is a helper function that fills in default values for unspecified tx fields.
 func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
-	if args.Gas == nil {
+	/*if args.Gas == nil {
 		args.Gas = new(hexutil.Uint64)
 		*(*uint64)(args.Gas) = 90000
 	}
@@ -1133,7 +1160,7 @@ func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
 			return err
 		}
 		args.GasPrice = (*hexutil.Big)(price)
-	}
+	}*/
 	if args.Value == nil {
 		args.Value = new(hexutil.Big)
 	}
@@ -1159,29 +1186,33 @@ func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
 			return errors.New(`contract creation without any data provided`)
 		}
 	}
+	args.B = &b
 	return nil
 }
 
-func (args *SendTxArgs) toTransaction() *types.Transaction {
+func (args *SendTxArgs) toTransaction(wallet core.Wallet,b Backend) *core.Transaction {
 	var input []byte
 	if args.Data != nil {
 		input = *args.Data
 	} else if args.Input != nil {
 		input = *args.Input
 	}
-	if args.To == nil {
-		return types.NewContractCreation(uint64(*args.Nonce), (*big.Int)(args.Value), uint64(*args.Gas), (*big.Int)(args.GasPrice), input)
-	}
-	return types.NewTransaction(uint64(*args.Nonce), *args.To, (*big.Int)(args.Value), uint64(*args.Gas), (*big.Int)(args.GasPrice), input)
+	/*if args.To == nil {
+		return core.NewContractCreation(uint64(*args.Nonce), (*big.Int)(args.Value), uint64(*args.Gas), (*big.Int)(args.GasPrice), input)
+	}*/
+	//return core.NewTransaction(uint64(*args.Nonce), *args.To, (*big.Int)(args.Value), uint64(*args.Gas), (*big.Int)(args.GasPrice), input)
+	nodeID := b.GetNodeId()
+	return core.NewTransaction(wallet,uint64(*args.Nonce), args.To, (*big.Int)(args.Value), input,nodeID)
 }
 
 // submitTransaction is a helper function that submits tx to txPool and logs a message.
-func submitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (common.Hash, error) {
+func submitTransaction(ctx context.Context, b Backend, tx *core.Transaction) (common.Hash, error) {
 	if err := b.SendTx(ctx, tx); err != nil {
 		return common.Hash{}, err
 	}
-	if tx.To() == nil {
-		signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Number())
+	fmt.Println("===  after submitTransaction: \n")
+	/*if tx.To() == nil {
+		signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Height)
 		from, err := types.Sender(signer, tx)
 		if err != nil {
 			return common.Hash{}, err
@@ -1192,8 +1223,10 @@ func submitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 		log.Info("Submitted transaction", "fullhash", tx.Hash().Hex(), "recipient", tx.To())
 	}
 	return tx.Hash(), nil
+	*/
+	return tx.HashCommon(), nil
 }
-
+/*
 // SendTransaction creates a transaction for the given argument, sign it and submit it to the
 // transaction pool.
 func (s *PublicTransactionPoolAPI) SendTransaction(ctx context.Context, args SendTxArgs) (common.Hash, error) {
@@ -1230,17 +1263,17 @@ func (s *PublicTransactionPoolAPI) SendTransaction(ctx context.Context, args Sen
 	}
 	return submitTransaction(ctx, s.b, signed)
 }
-
+*/
 // SendRawTransaction will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce.
 func (s *PublicTransactionPoolAPI) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
-	tx := new(types.Transaction)
+	tx := new(core.Transaction)
 	if err := rlp.DecodeBytes(encodedTx, tx); err != nil {
 		return common.Hash{}, err
 	}
 	return submitTransaction(ctx, s.b, tx)
 }
-
+/*
 // Sign calculates an ECDSA signature for:
 // keccack256("\x19Ethereum Signed Message:\n" + len(message) + message).
 //

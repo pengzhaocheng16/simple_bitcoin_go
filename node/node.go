@@ -99,10 +99,10 @@ func New(conf *Config) (*Node, error) {
 	}
 	// Ensure that the AccountManager method works before the node has started.
 	// We rely on this in cmd/geth.
-	//am, ephemeralKeystore, err := makeAccountManager(conf)
-	//if err != nil {
-	//	return nil, err
-	//}
+	/*am, ephemeralKeystore, err := makeAccountManager(conf)
+	if err != nil {
+		return nil, err
+	}*/
 	if conf.Logger == nil {
 		conf.Logger = log.New()
 	}
@@ -289,7 +289,7 @@ func (n *Node) startRPC(services map[reflect.Type]Service) error {
 		n.stopInProc()
 		return err
 	}
-	println(`rpcAPIs `,len(apis))
+	fmt.Printf(`rpcAPIs %v`,apis)
 	// All API endpoints started successfully
 	n.rpcAPIs = apis
 	return nil

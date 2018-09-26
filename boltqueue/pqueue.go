@@ -135,19 +135,24 @@ func cloneBytes(v []byte) []byte {
 }
 
 func (b *PQueue)IsExist(priority int, value []byte)bool{
-	var m *Message
+	//var m *Message
 	var result bool = false
 	err := b.conn.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte{byte(uint8(priority))})
 		c := b.Cursor()
 
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			m = &Message{priority: int(priority), key: cloneBytes(k), value: cloneBytes(v)}
-			if(bytes.Equal(m.value,value)){
+			//m = &Message{priority: int(priority), key: cloneBytes(k), value: cloneBytes(v)}
+			if(bytes.Equal(v,value)){
 				result = true
 				break
 			}
 		}
+		/*txIdBytes := b.Get(key)
+		if(txIdBytes != nil){
+			result = true
+		}*/
+
 		return nil
 	})
 	if err != nil {
@@ -156,20 +161,39 @@ func (b *PQueue)IsExist(priority int, value []byte)bool{
 	return result
 }
 
-func (b *PQueue)GetMsg(priority int, value []byte, preLen int)*Message{
-	var m *Message = nil
-	err := b.conn.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte{byte(uint8(priority))})
-		c := b.Cursor()
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			m = &Message{priority: int(priority), key: cloneBytes(k), value: cloneBytes(v)}
-			value = value[preLen:]
-			mvalue := m.value[preLen:]
-			if(bytes.Equal(mvalue,value)){
-				break
-			}
+func (b *PQueue)IsKeyExist(priority int, key []byte)bool{
+	var result bool = false
+	err := b.conn.Update(func(tx *bolt.Tx) error {
+		bu,err := tx.CreateBucketIfNotExists([]byte{byte(uint8(priority))})
+		if err != nil {
+			return err
 		}
+		txIdBytes := bu.Get(key)
+		if(txIdBytes != nil){
+			result = true
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Panic(err)
+	}
+	return result
+}
+
+func (b *PQueue)GetMsgBykey(priority int, txId []byte)*Message{
+	var m *Message = nil
+	err := b.conn.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte{byte(uint8(priority))})
+		if err != nil {
+			return err
+		}
+		//b := tx.Bucket([]byte{byte(uint8(priority))})
+		txBytes := b.Get(txId)
+		m = &Message{priority: int(priority), key: cloneBytes(txId), value: cloneBytes(txBytes)}
+
+		//fmt.Printf("txBytes: ", txBytes)
 		return nil
 	})
 	if err != nil {
@@ -178,7 +202,7 @@ func (b *PQueue)GetMsg(priority int, value []byte, preLen int)*Message{
 	return m
 }
 
-func (b *PQueue)GetMsgEqual(priority int, value []byte,start int,end int)*Message{
+func (b *PQueue)GetMsgEqual(priority int, value []byte)*Message{
 	var m *Message = nil
 	err := b.conn.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte{byte(uint8(priority))})
@@ -187,7 +211,7 @@ func (b *PQueue)GetMsgEqual(priority int, value []byte,start int,end int)*Messag
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			m = &Message{priority: int(priority), key: cloneBytes(k), value: cloneBytes(v)}
 			value = value
-			mvalue := m.value[start:end]
+			mvalue := m.value
 			if(bytes.Equal(mvalue,value)){
 				break
 			}
@@ -202,57 +226,30 @@ func (b *PQueue)GetMsgEqual(priority int, value []byte,start int,end int)*Messag
 
 
 
-func (b *PQueue)SetMsg(priority int, value []byte,tailLen int)*Message{
-	var m *Message = nil
-	err := b.conn.View(func(tx *bolt.Tx) error {
-		bu := tx.Bucket([]byte{byte(uint8(priority))})
-		c := bu.Cursor()
-
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			m = &Message{priority: int(priority), key: cloneBytes(k), value: cloneBytes(v)}
-			value = value[tailLen:]
-			mvalue := m.value[tailLen:]
-			if(bytes.Equal(mvalue,value)){
-				err := b.enqueueMessage(m.priority,m.key,NewMessageBytes(value))
-				if err != nil {
-					log.Panic(err)
-				}
-				break
-			}
+func (b *PQueue)SetMsg(priority int, txId []byte,value []byte) error{
+	return b.conn.Update(func(tx *bolt.Tx) error {
+		//bu := tx.Bucket([]byte{byte(uint8(priority))})
+		bn := []byte{byte(uint8(priority))}
+		bu,err := tx.CreateBucketIfNotExists(bn)
+		if err != nil {
+			return err
 		}
-		return nil
+		return bu.Put(txId, value)
 	})
-	if err != nil {
-		log.Panic(err)
-	}
-	return m
 }
 
 
-func (b *PQueue)DeleteMsg(priority int, value []byte,tailLen int)*Message{
-	var m *Message = nil
-	err := b.conn.View(func(tx *bolt.Tx) error {
-		bu := tx.Bucket([]byte{byte(uint8(priority))})
-		c := bu.Cursor()
-
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			m = &Message{priority: int(priority), key: cloneBytes(k), value: cloneBytes(v)}
-			value = value[tailLen:]
-			mvalue := m.value[tailLen:]
-			if(bytes.Equal(mvalue,value)){
-				// Remove message
-				if err := c.Delete(); err != nil {
-					return err
-				}
-				break
-			}
+func (b *PQueue)DeleteMsg(priority int, txId []byte)error{
+	return b.conn.Update(func(tx *bolt.Tx) error {
+		//bu := tx.Bucket([]byte{byte(uint8(priority))})
+		bn := []byte{byte(uint8(priority))}
+		bu,err := tx.CreateBucketIfNotExists(bn)
+		if err != nil {
+			return err
 		}
+		bu.Delete(txId)
 		return nil
 	})
-	if err != nil {
-		log.Panic(err)
-	}
-	return m
 }
 
 func (b *PQueue) Put(priority int,key []byte ,message Message)error{
@@ -277,7 +274,7 @@ func (b *PQueue) Get(priority int,key []byte)*Message{
 	p := make([]byte, 1)
 	p[0] = byte(uint8(priority))
 	var msg *Message
-	err := b.conn.View(func(tx *bolt.Tx) error {
+	err := b.conn.Update(func(tx *bolt.Tx) error {
 		// Get bucket for this priority level
 		pb, err := tx.CreateBucketIfNotExists(p)
 		if err != nil {
@@ -295,15 +292,15 @@ func (b *PQueue) Get(priority int,key []byte)*Message{
 }
 
 
-func (b *PQueue)GetAll(priority int)[][]byte{
-	var mv = [][]byte{}
+func (b *PQueue)GetAll(priority int)[]*Message{
+	var mv = []*Message{}
 	err := b.conn.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte{byte(uint8(priority))})
 		c := b.Cursor()
 
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			msg := &Message{priority: int(priority), key: cloneBytes(k), value: cloneBytes(v)}
-			mv = append(mv,msg.value)
+			mv = append(mv,msg)
 
 		}
 		return nil
