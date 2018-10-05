@@ -26,16 +26,18 @@ func main() {
 	var  txhash common.Hash
 	var  txhash1 common.Hash
 
-	err = client.Call(&blockNumber, "swc_blockNumber")
-	err = client.Call(&swc_coinbase, "swc_coinbase")
+	err = client.Call(&blockNumber, "eth_blockNumber")
+	err = client.Call(&swc_coinbase, "eth_coinbase")
 	err = client.Call(&clientversion, "web3_clientVersion")
 	var bigint = new(big.Int).SetInt64(0)
 	var bigNumber = (*hexutil.Big)(bigint)
-	err = client.Call(&block, "swc_getBlockByNumber",bigNumber,false)
+	err = client.Call(&block, "eth_getBlockByNumber",bigNumber,false)
 
 	var  balance = int64(0)
 
-	err = client.Call(&balance, "swc_getBalance","1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5")
+	var bigint1 = new(big.Int).SetInt64(0)
+	var bigNumber1 = (*hexutil.Big)(bigint1)
+	err = client.Call(&balance, "eth_getBalance","1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5",bigNumber1)
 
 	sendTx := new(swcapi.SendTxArgs)
 	sendTx1 := new(swcapi.SendTxArgs)
@@ -63,11 +65,11 @@ func main() {
 	err = client.Call(&txhash, "personal_sendTransaction",sendTx,"")
 	err = client.Call(&txhash1, "personal_sendTransaction",sendTx1,"")
 
-	fmt.Println("swc_blockNumber ", blockNumber)
-	fmt.Println("swc_coinbase ", swc_coinbase)
+	fmt.Println("eth_blockNumber ", blockNumber)
+	fmt.Println("eth_coinbase ", swc_coinbase)
 	fmt.Println("web3_clientversion ", clientversion)
-	fmt.Println("swc_getBlockByNumber ", block)
-	fmt.Println("swc_getBalance ",balance )
+	fmt.Println("eth_getBlockByNumber ", block)
+	fmt.Println("eth_getBalance ",balance )
 	fmt.Println("personal_sendTransaction ",txhash )
 	fmt.Println("personal_sendTransaction1 ",txhash1 )
 

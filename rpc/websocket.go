@@ -84,7 +84,7 @@ func NewWSServer(allowedOrigins []string, srv *Server) *http.Server {
 // websocket upgrade process. When a '*' is specified as an allowed origins all
 // connections are accepted.
 func wsHandshakeValidator(allowedOrigins []string) func(*websocket.Config, *http.Request) error {
-	origins := set.New()
+	origins := set.New(set.SetType(set.ThreadSafe))
 	allowAllOrigins := false
 
 	for _, origin := range allowedOrigins {

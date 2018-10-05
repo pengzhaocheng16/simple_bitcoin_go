@@ -70,7 +70,7 @@ func (b *SwcAPIBackend) BlockByNumber(ctx context.Context, blockNr rpc.BlockNumb
 	return b.swc.blockchain.GetBlockByNumber(uint64(blockNr)), nil
 }
 
-func (b *SwcAPIBackend) GetBalance(ctx context.Context, address string) (int64, error) {
+func (b *SwcAPIBackend) GetBalance(ctx context.Context, address common.Address) (int64, error) {
 	var balance *big.Int
 
 	bc := core.NewBlockchain(b.swc.nodeID)
@@ -78,6 +78,26 @@ func (b *SwcAPIBackend) GetBalance(ctx context.Context, address string) (int64, 
 	balance = b.swc.blockchain.GetBalance(address,b.swc.nodeID)
 	println("---",balance.Uint64())
 	return balance.Int64(),nil
+}
+
+func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to common.Address,amount *big.Int)([]core.TXInput,[]core.TXOutput,error){
+
+	bc := core.NewBlockchain(b.swc.nodeID)
+	inputs,outputs,err := bc.GetTxInOuts(from,to,amount,"")
+
+	//prevTXs := make(map[string]core.Transaction)
+
+	for _, vin := range inputs {
+		prevTX, err := bc.FindTransaction(vin.Txid)
+		vin.Signature = nil
+		vin.PubKey = prevTX.Vout[vin.Vout].PubKeyHash
+		if err != nil {
+			return nil,nil,err
+		}
+		//prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
+	}
+
+	return inputs,outputs,err
 }
 	/*
 	func (b *SwcAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*state.StateDB, *types.Header, error) {

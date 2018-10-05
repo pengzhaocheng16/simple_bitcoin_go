@@ -22,20 +22,26 @@ type UTXOSet struct {
 }
 
 // FindSpendableOutputs finds and returns unspent outputs to reference in inputs
-func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,minerCheck bool,spendTxid []byte) (uint64, map[string][]int) {
+func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,minerCheck bool,spendTxid []byte,pqueue *PQueue) (uint64, map[string][]int) {
 	unspentOutputs := make(map[string][]int)
 	accumulated := uint64(0)
 
 	log.Println("--start  FindSpendableOutputs ")
 	//queueFile := fmt.Sprintf("%x_tx.db", GetAddressFromPubkeyHash(pubkeyHash))
-	queueFile := GenWalletStateDbName(u.Blockchain.NodeId)
-	txPQueue, errcq := NewPQueue(queueFile)
-	//defer txPQueue.Close()
+	var txPQueue *PQueue
+	var errcq error
+	if(pqueue != nil){
+		txPQueue = pqueue
+	}else{
+		queueFile := GenWalletStateDbName(u.Blockchain.NodeId)
+		txPQueue, errcq = NewPQueue(queueFile)
+		if errcq != nil {
+			log.Panic("create queue error",errcq)
+		}
+		defer txPQueue.Close()
+	}
 	//defer os.Remove(queueFile)
 
-	if errcq != nil {
-		log.Panic("create queue error",errcq)
-	}
 	qsize, errqs := txPQueue.Size(1)
 	if (errqs != nil) {
 		fmt.Printf("get pending tx queue size error %s \n", errqs)
@@ -75,7 +81,7 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,minerCh
 
 		return nil
 	})
-	txPQueue.Close()
+	//txPQueue.Close()
 	log.Println("--after  FindSpendableOutputs accumulated: %d",accumulated)
 	if err != nil {
 		log.Panic(err)
@@ -241,17 +247,12 @@ func (u UTXOSet) Update(block *Block) {
 
 
 // verify transaction:timeLine UTXOAmount coinbaseTX
-func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Block) (bool,int) {
+func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Block,txPQueue *PQueue) (bool,int) {
 	//TODO timeline check
 	var coinbaseNumber = uint64(0)
 	var coinbaseReward = uint64(0)
 	var result = false;
-	queueFile := GenWalletStateDbName(u.Blockchain.NodeId)
-	txPQueue, errcq := NewPQueue(queueFile)
 	//defer txPQueue.Close()
-	if errcq != nil {
-		log.Panic("create queue error", errcq)
-	}
 
 	for k, tx := range block.Transactions {
 
@@ -270,12 +271,12 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 					return false,8;
 				}
 			}
-			txPQueue.Close()
-			result = u.IsUTXOAmountValid(tx)
-			txPQueue, errcq = NewPQueue(queueFile)
-			if errcq != nil {
-				log.Panic("create queue error", errcq)
-			}
+			//txPQueue.Close()
+			result = u.IsUTXOAmountValid(tx,txPQueue)
+			//txPQueue, errcq = NewPQueue(queueFile)
+			//if errcq != nil {
+			//	log.Panic("create queue error", errcq)
+			//}
 			if(!result){
 				//delete outdated vin txid in database
 				for _,tx1 := range block.Transactions[0:k]{
@@ -315,10 +316,10 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 	return true,0
 }
 
-func (u UTXOSet) IsUTXOAmountValid(tx *Transaction) bool{
+func (u UTXOSet) IsUTXOAmountValid(tx *Transaction,pqueue *PQueue) bool{
 	pubKeyHash := HashPubKey(tx.Vin[0].PubKey)
 	acc, _ :=
-		u.FindSpendableOutputs(pubKeyHash, big.NewInt(int64(tx.Vout[0].Value)),true,tx.Vin[0].Txid)
+		u.FindSpendableOutputs(pubKeyHash, big.NewInt(int64(tx.Vout[0].Value)),true,tx.Vin[0].Txid,pqueue)
 	//var acc = 0
 	//UTXOs := UTXOSet.FindUTXO(u,pubKeyHash)
 	//fmt.Printf("len UTXOs %d \n", len(UTXOs))

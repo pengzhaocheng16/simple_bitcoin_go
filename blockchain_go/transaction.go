@@ -31,14 +31,12 @@ type Transaction struct {
 	size atomic.Value
 	data txdata
 }
-// Transactions is a Transaction slice type for basic sorting.
-type Transactions []*Transaction
 type writeCounter common.StorageSize
 
 type txdata struct {
 	AccountNonce uint64          `json:"nonce"    gencodec:"required"`
-	//Price        *big.Int        `json:"gasPrice" gencodec:"required"`
-	//GasLimit     uint64          `json:"gas"      gencodec:"required"`
+	Price        *big.Int        `json:"gasPrice" gencodec:"required"`//
+	GasLimit     uint64          `json:"gas"      gencodec:"required"`//
 	Recipient    *common.Address `json:"to"       rlp:"nil"` // nil means contract creation
 	Amount       *big.Int        `json:"value"    gencodec:"required"`
 	Payload      []byte          `json:"input"    gencodec:"required"`
@@ -87,6 +85,23 @@ func (tx *Transaction) Hash() []byte {
 	return hash[:]
 }
 
+
+// Hash returns the hash of the Transaction
+func (tx *Transaction) RLPHash() []byte {
+	var hash [32]byte
+
+	txCopy := *tx
+	txCopy.ID = []byte{}
+
+	txBytes,err := rlp.EncodeToBytes(txCopy)
+	if(err!=nil){
+		log.Panic(err)
+	}
+	hash = sha256.Sum256(txBytes)
+
+	return hash[:]
+}
+
 // Hash returns the hash of the Transaction
 func (tx *Transaction) HashCommon() common.Hash {
 	var hash []byte
@@ -114,7 +129,7 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 		txCopy.Vin[inID].Signature = nil
 		txCopy.Vin[inID].PubKey = prevTx.Vout[vin.Vout].PubKeyHash
 
-		dataToSign := fmt.Sprintf("%x\n", txCopy)
+		dataToSign := fmt.Sprintf("%x\n", txCopy.RLPHash())
 
 		r, s, err := ecdsa.Sign(rand.Reader, &privKey, []byte(dataToSign))
 		if err != nil {
@@ -205,7 +220,7 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
 		x.SetBytes(vin.PubKey[:(keyLen / 2)])
 		y.SetBytes(vin.PubKey[(keyLen / 2):])
 
-		dataToVerify := fmt.Sprintf("%x\n", txCopy)
+		dataToVerify := fmt.Sprintf("%x\n", txCopy.RLPHash())
 
 		rawPubKey := ecdsa.PublicKey{curve, &x, &y}
 		if ecdsa.Verify(&rawPubKey, []byte(dataToVerify), &r, &s) == false {
@@ -271,7 +286,7 @@ func NewUTXOTransaction(wallet *Wallet, to string, amount *big.Int,data []byte, 
 	var inputs []TXInput
 	var outputs []TXOutput
 
-	acc, validOutputs := UTXOSet.FindSpendableOutputs(pubKeyHash, amount,false,nil)
+	acc, validOutputs := UTXOSet.FindSpendableOutputs(pubKeyHash, amount,false,nil,nil)
 
 	if acc < amount.Uint64() {
 		log.Panic("ERROR: Not enough funds")
@@ -375,7 +390,6 @@ func (tx *Transaction) DecodeRLP(s *rlp.Stream) error {
 	if err == nil {
 		tx.size.Store(common.StorageSize(rlp.ListSize(size)))
 	}
-
 	return err
 }
 */
@@ -387,7 +401,8 @@ func (tx *Transaction) Size() common.StorageSize {
 		return size.(common.StorageSize)
 	}
 	c := writeCounter(0)
-	rlp.Encode(&c, &tx)
+	txserial := tx.Serialize();
+	rlp.Encode(&c, &txserial)
 	tx.size.Store(common.StorageSize(c))
 	return common.StorageSize(c)
 }
@@ -444,7 +459,7 @@ func VerifyTx(tx Transaction,bc *Blockchain)bool{
 		valid1 = false
 	}
 	UTXOSet := UTXOSet{bc}
-	if(tx.IsCoinbase()==false&&!UTXOSet.IsUTXOAmountValid(&tx)){
+	if(tx.IsCoinbase()==false&&!UTXOSet.IsUTXOAmountValid(&tx,nil)){
 		//log.Panic("ERROR: Invalid transaction:amount")
 		valid2 = false
 	}
@@ -458,6 +473,36 @@ func VerifyTx(tx Transaction,bc *Blockchain)bool{
 	}
 }
 
+
+
+// Transactions is a Transaction slice type for basic sorting.
+type Transactions []*Transaction
+// Len returns the length of s.
+func (s Transactions) Len() int { return len(s) }
+// Swap swaps the i'th and the j'th element in s.
+func (s Transactions) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+// GetRlp implements Rlpable and returns the i'th element of s in rlp.
+func (s Transactions) GetRlp(i int) []byte {
+	enc, _ := rlp.EncodeToBytes(s[i])
+	return enc
+}
+// TxDifference returns a new set t which is the difference between a to b.
+func TxDifference(a, b Transactions) (keep Transactions) {
+	keep = make(Transactions, 0, len(a))
+
+	remove := make(map[common.Hash]struct{})
+	for _, tx := range b {
+		remove[common.BytesToHash(tx.Hash())] = struct{}{}
+	}
+
+	for _, tx := range a {
+		if _, ok := remove[common.BytesToHash(tx.Hash())]; !ok {
+			keep = append(keep, tx)
+		}
+	}
+
+	return keep
+}
 // TxByNonce implements the sort interface to allow sorting a list of transactions
 // by their nonces. This is usually only useful for sorting transactions from a
 // single account, otherwise a nonce comparison doesn't make much sense.
@@ -478,7 +523,70 @@ func NewTransaction(wallet Wallet,nonce uint64,to *common.Address,amount *big.In
 	var inputs []TXInput
 	var outputs []TXOutput
 
-	acc, validOutputs := uTXOSet.FindSpendableOutputs(pubKeyHash, amount,false,nil)
+	acc, validOutputs := uTXOSet.FindSpendableOutputs(pubKeyHash, amount,false,nil,nil)
+	bc.Db.Close()
+
+	if acc < amount.Uint64() {
+		log.Panic("ERROR: Not enough funds")
+	}
+
+	// Build a list of inputs
+	for txid, outs := range validOutputs {
+		txID, err := hex.DecodeString(txid)
+		if err != nil {
+			log.Panic(err)
+		}
+		for _, out := range outs {
+			input := TXInput{txID, out, nil, wallet.PublicKey}
+			inputs = append(inputs, input)
+		}
+	}
+
+	// Build a list of outputs
+	from := fmt.Sprintf("%s", wallet.GetAddress())
+	outputs = append(outputs, *NewTXOutput(amount, CommonAddressToBase58(to)))
+	if acc > amount.Uint64() {
+		outputs = append(outputs, *NewTXOutput(big.NewInt(int64(acc-amount.Uint64())), from)) // a change
+	}
+
+	d := txdata{
+		AccountNonce: nonce,
+		Recipient:    to ,
+		Payload:      input,
+		Amount:       amount,
+		//GasLimit:     gasLimit,
+		//Price:        new(big.Int),
+		V:            new(big.Int),
+		R:            new(big.Int),
+		S:            new(big.Int),
+	}
+
+	//build a transaction
+	var v = atomic.Value{}
+	v.Store(common.StorageSize(0))
+	tx := Transaction{nil, inputs, outputs, time.Now().Unix(),v,d}
+	tx.ID = tx.Hash()
+	tx.SetSize(uint64(len(tx.Serialize())))
+
+	fmt.Printf("===after build transaction %x \n", tx.ID)
+
+	return &tx
+}
+
+/**
+	new transaction from singed transaction field
+ */
+ /*
+func NewTransactionSigned(from *common.Address,nonce uint64,to *common.Address,amount *big.Int,input []byte,nodeID string)*Transaction{
+	var bc = NewBlockchain(nodeID)
+	uTXOSet := UTXOSet{bc}
+
+	//pubKeyHash := HashPubKey(wallet.PublicKey)
+	pubkey, err := secp256k1.RecoverPubkey(hash, sig)
+	var inputs []TXInput
+	var outputs []TXOutput
+
+	acc, validOutputs := uTXOSet.FindSpendableOutputs(pubKeyHash, amount,false,nil,nil)
 	bc.Db.Close()
 
 	if acc < amount.Uint64() {
@@ -528,3 +636,4 @@ func NewTransaction(wallet Wallet,nonce uint64,to *common.Address,amount *big.In
 
 	return &tx
 }
+ */

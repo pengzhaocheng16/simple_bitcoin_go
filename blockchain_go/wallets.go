@@ -46,15 +46,15 @@ func (ws *Wallets) CreateWallet() string {
 	priKey := paddedAppend(privKeyBytesLen, b, d)
 	priKeySt := fmt.Sprintf("%s:%x\n", address,priKey)
 	//err := ioutil.WriteFile("key.txt", priKey, 0644)
-	fl, err := os.OpenFile("./key.txt", os.O_APPEND|os.O_CREATE, 0644)
+	fl, err := os.OpenFile("./key.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	//fmt.Sprintf("%s", fl.Name())
 	if(err!=nil){
 		log.Fatal("create key file failed!")
 	}
-	defer fl.Close()
 	n, err := fl.Write([]byte(priKeySt))
 	if err == nil && n < len(priKey) {
 	}
+	defer fl.Close()
 	if err!=nil{
 		log.Panic(err)
 	}

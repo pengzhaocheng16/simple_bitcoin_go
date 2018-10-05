@@ -44,9 +44,10 @@ const (
 
 // NewServer will create a new server instance with no registered handlers.
 func NewServer() *Server {
+	s := (set.New(set.SetType(set.ThreadSafe)))
 	server := &Server{
 		services: make(serviceRegistry),
-		codecs:   set.New(),
+		codecs:  s.(*set.Set),
 		run:      1,
 	}
 

@@ -14,6 +14,7 @@ import (
 	"crypto/sha256"
 	"github.com/ethereum/go-ethereum/common"
 	"../blockchain_go/rawdb"
+	."../boltqueue"
 )
 
 const dbFile = "blockchain_%s.db"
@@ -21,6 +22,10 @@ const blocksBucket = "blocks"
 const genesisCoinbaseData = "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks"
 
 const halfRewardblockCount = 2100000
+
+
+var ErrNotEnoughFunds = errors.New("not enough funds")
+
 
 // Blockchain implements interactions with a DB
 type Blockchain struct {
@@ -495,10 +500,23 @@ func (bc *Blockchain)IsBlockValid(newBlock *Block) (bool,int) {
 
 	//transaction consistent validate
 	UTXOSet := UTXOSet{bc}
-	valid,reason := UTXOSet.VerifyTxTimeLineAndUTXOAmount(oldBlock.Timestamp,newBlock)
+	queueFile := GenWalletStateDbName(bc.NodeId)
+	txPQueue, errcq := NewPQueue(queueFile)
+	if errcq != nil {
+		log.Panic("create queue error", errcq)
+	}
+	valid,reason := UTXOSet.VerifyTxTimeLineAndUTXOAmount(oldBlock.Timestamp,newBlock,txPQueue)
 	if(!valid){
 		//reason = 6
 		return false,reason
+	}else{
+		//delete outdated vin txid in database
+		for _,tx1 := range newBlock.Transactions{
+			for _,in := range tx1.Vin{
+				//delete vin tx id
+				txPQueue.DeleteMsg(4,in.Txid)
+			}
+		}
 	}
 	for _,tx := range newBlock.Transactions{
 		if(!VeryfyFromToAddress(tx)){
@@ -633,13 +651,14 @@ func (bc *Blockchain) GetBlockByNumber(number uint64) *Block {
 	return &lastBlock
 }
 
-func (bc *Blockchain)GetBalance(address, nodeID string)*big.Int{
+func (bc *Blockchain)GetBalance(address common.Address, nodeID string)*big.Int{
 	UTXOSet := UTXOSet{bc}
 	defer bc.Db.Close()
 
 	balance := big.NewInt(0)
-	pubKeyHash := Base58Decode([]byte(address))
-	pubKeyHash = pubKeyHash[1 : len(pubKeyHash)-4]
+	//pubKeyHash := Base58Decode([]byte(address))
+	//pubKeyHash = pubKeyHash[1 : len(pubKeyHash)-4]
+	pubKeyHash := address.Bytes()
 
 	UTXOs := UTXOSet.FindUTXO(pubKeyHash)
 
@@ -648,4 +667,40 @@ func (bc *Blockchain)GetBalance(address, nodeID string)*big.Int{
 			big.NewInt(int64(out.Value)))
 	}
 	return balance
+}
+
+func (bc *Blockchain)GetTxInOuts(from common.Address,to common.Address,amount *big.Int,nodeID string)([]TXInput,[]TXOutput,error){
+	uTXOSet := UTXOSet{bc}
+	defer bc.Db.Close()
+	var pubKeyHash []byte = from.Bytes()
+	acc, validOutputs := uTXOSet.FindSpendableOutputs(pubKeyHash, amount,false,nil,nil)
+
+	if acc < amount.Uint64() {
+		return nil,nil,ErrNotEnoughFunds
+	}
+
+	var inputs []TXInput
+	var outputs []TXOutput
+	// Build a list of inputs
+	for txid, outs := range validOutputs {
+		txID, err := hex.DecodeString(txid)
+		if err != nil {
+			log.Panic(err)
+		}
+		for _, out := range outs {
+			//input := TXInput{txID, out, nil, wallet.PublicKey}
+			input := TXInput{txID, out, nil, nil}
+			inputs = append(inputs, input)
+		}
+	}
+
+	// Build a list of outputs
+	//from := fmt.Sprintf("%s", GetAddressFromPubkeyHash(pubKeyHash))
+	fromstr := fmt.Sprintf("%s", from)
+	tostr := fmt.Sprintf("%s", to)
+	outputs = append(outputs, *NewTXOutput(amount, tostr))
+	if acc > amount.Uint64() {
+		outputs = append(outputs, *NewTXOutput(big.NewInt(int64(acc-amount.Uint64())), fromstr)) // a change
+	}
+	return inputs,outputs,nil
 }

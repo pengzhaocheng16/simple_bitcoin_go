@@ -38,11 +38,11 @@ const txsyncPackSize = 100 * 1024
 
 var nodeAddress string
 var miningAddress string
-var BootNodes = []string{"192.168.43.43:2000"}
+var BootNodes = []string{"119.27.191.247:2000"}
 var BootPeers = []*discover.Node{}
 var CurrentNodeInfo *p2p.NodeInfo
 var blocksInTransit = [][]byte{}
-var blocksInTransitSet = set.New()
+var blocksInTransitSet = set.New(set.SetType(set.ThreadSafe))
 
 var send = make(chan interface{}, 1)
 
@@ -567,9 +567,9 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 
 	txData := payload.Transaction
 	tx := core.DeserializeTransaction(txData)
-	tx.SetSize(uint64(len(txData)))
+	//tx.SetSize(uint64(len(txData)))
 
-	//tx.Size()
+	tx.Size()
 
 	Manager.TxMempool[hex.EncodeToString(tx.ID)] = &tx
 
@@ -832,15 +832,15 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 		nodeIDs := dotray.QueryNodes(10)
 		fmt.Println("query nodes:", nodeIDs)
 	*/
-	 wallets, err := core.NewWallets("192.168.43.43:2000")
+	 wallets, err := core.NewWallets("119.27.191.247:2000")
 	 if err != nil {
 		 log.Panic(err)
 	 }
 	 walletaddrs := wallets.GetAddresses()
 	 wallet := wallets.GetWallet(walletaddrs[0])
 	 var peers []*discover.Node
-	 if(nodeID!="192.168.43.43:2000"){
-	 	peers = []*discover.Node{&discover.Node{IP: net.ParseIP("192.168.43.43"),TCP:2000,UDP:2000,ID: discover.PubkeyID(&wallet.PrivateKey.PublicKey)}}
+	 if(nodeID!="119.27.191.247:2000"){
+	 	peers = []*discover.Node{&discover.Node{IP: net.ParseIP("119.27.191.247"),TCP:2000,UDP:2000,ID: discover.PubkeyID(&wallet.PrivateKey.PublicKey)}}
 	 }else{
 	 	peers = nil
 	 }
@@ -1318,7 +1318,7 @@ func confirmTx(newblock *core.Block,chainId string) bool {
 			for _,vin := range tx.Vin{
 				txPQueue.DeleteMsg(1,vin.Txid)
 			}
-			txPQueue.DeleteMsg(3,txidold)
+			//txPQueue.DeleteMsg(3,txidold)
 		} else {
 			txPQueue.SetMsg(2, txidold, newhash)
 		}

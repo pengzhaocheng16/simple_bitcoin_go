@@ -23,6 +23,7 @@ import (
 	"../../rpc"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/common"
+	"math/big"
 )
 
 // Backend interface provides the common API services (that are provided by
@@ -40,7 +41,8 @@ type Backend interface {
 	//SetHead(number uint64)
 	//HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error)
 	BlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*core.Block, error)
-	GetBalance(ctx context.Context,address string)(int64, error)
+	GetBalance(ctx context.Context,address common.Address)(int64, error)
+	GetTxInOuts(ctx context.Context,from common.Address,to common.Address,amount *big.Int)([]core.TXInput,[]core.TXOutput,error)
 	/*StateAndHeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*state.StateDB, *types.Header, error)
 	GetBlock(ctx context.Context, blockHash common.Hash) (*types.Block, error)
 	GetReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, error)
@@ -71,12 +73,12 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 	nonceLock := new(AddrLocker)
 	return []rpc.API{
 		{
-			Namespace: "swc",
+			Namespace: "eth",
 			Version:   "1.0",
 			Service:   NewPublicEthereumAPI(apiBackend),
 			Public:    true,
 		}, {
-			Namespace: "swc",
+			Namespace: "eth",
 			Version:   "1.0",
 			Service:   NewPublicBlockChainAPI(apiBackend),
 			Public:    true,

@@ -34,7 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
+	/*"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	*/
 	"github.com/ethereum/go-ethereum/accounts"
@@ -51,6 +51,7 @@ import (
 	"math/big"
 	"bytes"
 	"github.com/ethereum/go-ethereum/rlp"
+
 )
 
 const (
@@ -67,12 +68,13 @@ type PublicEthereumAPI struct {
 func NewPublicEthereumAPI(b Backend) *PublicEthereumAPI {
 	return &PublicEthereumAPI{b}
 }
-/*
+
 // GasPrice returns a suggestion for a gas price.
 func (s *PublicEthereumAPI) GasPrice(ctx context.Context) (*big.Int, error) {
-	return s.b.SuggestPrice(ctx)
+	//return s.b.SuggestPrice(ctx)
+	return big.NewInt(0),nil
 }
-*/
+
 // ProtocolVersion returns the current Ethereum protocol version this node supports
 func (s *PublicEthereumAPI) ProtocolVersion() hexutil.Uint {
 	return hexutil.Uint(s.b.ProtocolVersion())
@@ -371,7 +373,7 @@ func (s *PrivateAccountAPI) signTransaction(ctx context.Context, args SendTxArgs
 	tx := args.toTransaction(wallet,s.b)
 
 	//fmt.Printf("===af toTransaction tx  \n")
-	//In case of double spend check fail need to store prev uncomfirmed transaction input tx
+	//In order to prevent double spend（check fail) need to store prev uncomfirmed transaction input tx
 	core.PendingIn(s.b.GetNodeId(),tx)
 	//fmt.Printf("===af PendingIn tx  \n")
 
@@ -404,7 +406,6 @@ func (s *PrivateAccountAPI) SendTransaction(ctx context.Context, args SendTxArgs
 	}
 	return submitTransaction(ctx, s.b, signed)
 }
-/*
 // SignTransaction will create a transaction from the given arguments and
 // tries to sign it with the key associated with args.To. If the given passwd isn't
 // able to decrypt the key it fails. The transaction is returned in RLP-form, not broadcast
@@ -412,12 +413,12 @@ func (s *PrivateAccountAPI) SendTransaction(ctx context.Context, args SendTxArgs
 func (s *PrivateAccountAPI) SignTransaction(ctx context.Context, args SendTxArgs, passwd string) (*SignTransactionResult, error) {
 	// No need to obtain the noncelock mutex, since we won't be sending this
 	// tx into the transaction pool, but right back to the user
-	if args.Gas == nil {
+	/*if args.Gas == nil {
 		return nil, fmt.Errorf("gas not specified")
 	}
 	if args.GasPrice == nil {
 		return nil, fmt.Errorf("gasPrice not specified")
-	}
+	}*/
 	if args.Nonce == nil {
 		return nil, fmt.Errorf("nonce not specified")
 	}
@@ -432,6 +433,7 @@ func (s *PrivateAccountAPI) SignTransaction(ctx context.Context, args SendTxArgs
 	return &SignTransactionResult{data, signed}, nil
 }
 
+/*
 // signHash is a helper function that calculates a hash for the given message that can be
 // safely used to calculate a signature from.
 //
@@ -526,7 +528,7 @@ func (s *PublicBlockChainAPI) BlockNumber() uint64 {
 // GetBalance returns the amount of wei for the given address in the state of the
 // given block number. The rpc.LatestBlockNumber and rpc.PendingBlockNumber meta
 // block numbers are also allowed.
-func (s *PublicBlockChainAPI) GetBalance(ctx context.Context, address string) (int64, error) {
+func (s *PublicBlockChainAPI) GetBalance(ctx context.Context, address common.Address,blockNr  rpc.BlockNumber) (int64, error) {
 	/*state, _, err := s.b.StateAndHeaderByNumber(ctx, blockNr)
 	if state == nil || err != nil {
 		return nil, err
@@ -550,6 +552,21 @@ func (s *PublicBlockChainAPI) GetBlockByNumber(ctx context.Context, blockNr rpc.
 			}
 		}
 		return response, err
+	}
+	return nil, err
+}
+
+// GetTxInOuts returns the requested block. When blockNr is -1 the chain head is returned. When fullTx is true all
+// transactions in the block are returned in full detail, otherwise only the transaction hash is returned.
+func (s *PublicBlockChainAPI) GetTxInOuts(ctx context.Context, from common.Address, to common.Address, amount big.Int) (map[string]interface{}, error) {
+	txinputs,txoutputs, err := s.b.GetTxInOuts(ctx,from,to,&amount)
+	fmt.Println("txinputs ",txinputs)
+	if txinputs != nil && txoutputs!=nil && err == nil {
+		fields := map[string]interface{}{
+			"inputs":txinputs,
+			"outpusts":txoutputs,
+		}
+		return fields, err
 	}
 	return nil, err
 }
@@ -840,10 +857,10 @@ func (s *PublicBlockChainAPI) rpcOutputBlock(b *core.Block, inclTx bool, fullTx 
 		"logsBloom":        head.Bloom,
 		"stateRoot":        head.Root,
 		"miner":            head.Coinbase,*/
-		//"difficulty":       (*hexutil.Big)(b.Difficulty),
+		"difficulty":       (*hexutil.Big)(b.Difficulty),
 		/*"totalDifficulty":  (*hexutil.Big)(s.b.GetTd(b.Hash())),
 		"extraData":        hexutil.Bytes(head.Extra),*/
-		//"size":             hexutil.Uint64(len(b.Serialize())),
+		"size":             hexutil.Uint64(len(b.Serialize())),
 		/*"gasLimit":         hexutil.Uint64(head.GasLimit),
 		"gasUsed":          hexutil.Uint64(head.GasUsed),
 		"timestamp":        (*hexutil.Big)(b.Timestamp),
@@ -1026,17 +1043,20 @@ func (s *PublicTransactionPoolAPI) GetRawTransactionByBlockHashAndIndex(ctx cont
 	}
 	return nil
 }
-
+*/
 // GetTransactionCount returns the number of transactions the given address has sent for the given block number
 func (s *PublicTransactionPoolAPI) GetTransactionCount(ctx context.Context, address common.Address, blockNr rpc.BlockNumber) (*hexutil.Uint64, error) {
-	state, _, err := s.b.StateAndHeaderByNumber(ctx, blockNr)
+	/*state, _, err := s.b.StateAndHeaderByNumber(ctx, blockNr)
 	if state == nil || err != nil {
 		return nil, err
 	}
 	nonce := state.GetNonce(address)
 	return (*hexutil.Uint64)(&nonce), state.Error()
+*/
+	nonce, err := s.b.GetPoolNonce(ctx, address)
+	return (*hexutil.Uint64)(&nonce), err
 }
-
+/*
 // GetTransactionByHash returns the transaction for the given hash
 func (s *PublicTransactionPoolAPI) GetTransactionByHash(ctx context.Context, hash common.Hash) *RPCTransaction {
 	// Try to return an already finalized transaction
@@ -1271,6 +1291,9 @@ func (s *PublicTransactionPoolAPI) SendRawTransaction(ctx context.Context, encod
 	if err := rlp.DecodeBytes(encodedTx, tx); err != nil {
 		return common.Hash{}, err
 	}
+	//nodeID := s.b.GetNodeId()
+	//tx1 = core.NewTransactionSigned(tx.RawSignatureValues(),tx.Nonce(), tx.To(), tx.Value(), tx.Data(),nodeID)
+
 	return submitTransaction(ctx, s.b, tx)
 }
 /*
@@ -1298,13 +1321,13 @@ func (s *PublicTransactionPoolAPI) Sign(addr common.Address, data hexutil.Bytes)
 	}
 	return signature, err
 }
-
+*/
 // SignTransactionResult represents a RLP encoded signed transaction.
 type SignTransactionResult struct {
 	Raw hexutil.Bytes      `json:"raw"`
-	Tx  *types.Transaction `json:"tx"`
+	Tx  *core.Transaction `json:"tx"`
 }
-
+/*
 // SignTransaction will sign the given transaction with the from account.
 // The node needs to have the private key of the account corresponding with
 // the given from address and it needs to be unlocked.

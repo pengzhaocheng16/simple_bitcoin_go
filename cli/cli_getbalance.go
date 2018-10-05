@@ -22,7 +22,8 @@ func (cli *CLI) getBalance(address, nodeID string) {
 	for _, out := range UTXOs {
 		balance += out.Value
 	}*/
-	balance := bc.GetBalance(address,nodeID);
+	addressCommon := core.Base58ToCommonAddress([]byte(address))
+	balance := bc.GetBalance(addressCommon,nodeID);
 
 	fmt.Printf("Balance of '%s': %d\n", address, balance)
 }

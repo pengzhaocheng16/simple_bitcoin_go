@@ -130,6 +130,7 @@ func (w Wallet) SignTxWithPassphrase(account accounts.Account,passwd string,tx *
 		bc = bcc
 	}else{
 		bc = NewBlockchain(nodeID)
+		defer bc.Db.Close()
 	}
 	prevTXs := make(map[string]Transaction)
 
@@ -140,9 +141,9 @@ func (w Wallet) SignTxWithPassphrase(account accounts.Account,passwd string,tx *
 		}
 		prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
 	}
-	if(bcc == nil) {
+	/*if(bcc == nil) {
 		bc.Db.Close()
-	}
+	}*/
 
 	tx.Sign(w.PrivateKey, prevTXs)
 	return tx,nil
