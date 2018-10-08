@@ -77,7 +77,9 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 			for _, p := range p2pprotocol.Manager.Peers.Peers {
 				p2pprotocol.SendTx(p, p.Rw, tx)
 			}
+			p2pprotocol.Manager.Mu.Lock()
 			p2pprotocol.Manager.TxMempool[hex.EncodeToString(tx.ID)] = tx
+		    p2pprotocol.Manager.Mu.Unlock()
 		//}()
 		//select{}
 		for{
@@ -115,7 +117,9 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 			for _, p := range p2pprotocol.Manager.Peers.Peers {
 				p2pprotocol.SendTx(p, p.Rw, tx)
 			}
+			p2pprotocol.Manager.Mu.Lock()
 			p2pprotocol.Manager.TxMempool[hex.EncodeToString(tx.ID)] = tx
+			p2pprotocol.Manager.Mu.Unlock()
 			bc.Db.Close()
 			//cli.send(fromaddress,toaddress,amountnum,nodeID,false)
 		}

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"math/big"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/crypto/sha3"
 )
 
 // Some weird constants to avoid constant memory allocs for them.
@@ -66,6 +68,10 @@ func NewBlock(transactions []*Transaction, prevBlockHash []byte, height *big.Int
 	return block
 }
 
+func (b *Block)NumberU64()uint64{
+	return b.Height.Uint64()
+}
+
 // NewGenesisBlock creates and returns genesis Block
 func NewGenesisBlock(coinbase *Transaction) *Block {
 	return NewBlock([]*Transaction{coinbase}, []byte{}, big.NewInt(0),true,nil)
@@ -83,6 +89,14 @@ func (b *Block) HashTransactions() []byte {
 	mTree := NewMerkleTree(transactions)
 
 	return mTree.RootNode.Data
+}
+
+
+func rlpHash(x interface{}) (h common.Hash) {
+	hw := sha3.NewKeccak256()
+	rlp.Encode(hw, x)
+	hw.Sum(h[:0])
+	return h
 }
 
 // Serialize serializes the block
@@ -104,6 +118,7 @@ func DeserializeBlock(d []byte) *Block {
 	var block Block
 
 	fmt.Printf("len(d) 1 %d \n", len(d))
+	//fmt.Printf("d 1 %s \n", d)
 	gob.Register(common.Hash{})
 	decoder := gob.NewDecoder(bytes.NewReader(d))
 	err := decoder.Decode(&block)

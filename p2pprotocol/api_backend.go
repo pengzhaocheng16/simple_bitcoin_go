@@ -83,14 +83,15 @@ func (b *SwcAPIBackend) GetBalance(ctx context.Context, address common.Address) 
 func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to common.Address,amount *big.Int)([]core.TXInput,[]core.TXOutput,error){
 
 	bc := core.NewBlockchain(b.swc.nodeID)
-	inputs,outputs,err := bc.GetTxInOuts(from,to,amount,"")
+	utxo := core.UTXOSet{bc}
+	inputs,outputs,err := utxo.GetTxInOuts(from,to,amount,"")
 
 	//prevTXs := make(map[string]core.Transaction)
 
 	for _, vin := range inputs {
 		prevTX, err := bc.FindTransaction(vin.Txid)
 		vin.Signature = nil
-		vin.PubKey = prevTX.Vout[vin.Vout].PubKeyHash
+		vin.PubKey = prevTX.Vout[vin.Vout.Int64()].PubKeyHash
 		if err != nil {
 			return nil,nil,err
 		}
@@ -179,8 +180,8 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 			SendTx(p, p.Rw, signedTx)
 		}
 		//TODO pool lock mangement
-		Manager.mu.Lock()
-		defer Manager.mu.Unlock()
+		Manager.Mu.Lock()
+		defer Manager.Mu.Unlock()
 
 		Manager.TxMempool[hex.EncodeToString(signedTx.ID)] = signedTx
 		// return b.swc.txPool.AddLocal(signedTx)

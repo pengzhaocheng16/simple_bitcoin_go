@@ -37,14 +37,16 @@ func main() {
 
 	var bigint1 = new(big.Int).SetInt64(0)
 	var bigNumber1 = (*hexutil.Big)(bigint1)
-	err = client.Call(&balance, "eth_getBalance","1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5",bigNumber1)
+	err = client.Call(&balance, "eth_getBalance","1Q1oECL9rvC642THhNB6QZMqU55fDieXDK",bigNumber1)
 
 	sendTx := new(swcapi.SendTxArgs)
 	sendTx1 := new(swcapi.SendTxArgs)
 	var from = core.Base58ToCommonAddress([]byte("1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5"))
-	var to = core.Base58ToCommonAddress([]byte("1G7EmF7Umd96FLMKh3PhqZCi3bfMzqC4tH"))
+	var to = core.Base58ToCommonAddress([]byte("1Q1oECL9rvC642THhNB6QZMqU55fDieXDK"))
+	//var to = core.Base58ToCommonAddress([]byte("1G7EmF7Umd96FLMKh3PhqZCi3bfMzqC4tH"))
 	var from1 = core.Base58ToCommonAddress([]byte("1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5"))
-	var to1 = core.Base58ToCommonAddress([]byte("1Czy7TAfKMAFctBQV14t5KkeH3c2ptTcZA"))
+	var to1 = core.Base58ToCommonAddress([]byte("1G7EmF7Umd96FLMKh3PhqZCi3bfMzqC4tH"))
+
 
 	var nonce = hexutil.Uint64(1)
 	var bigi = new(big.Int).SetInt64(10)
@@ -63,7 +65,7 @@ func main() {
 	sendTx1.Data = &data
 
 	err = client.Call(&txhash, "personal_sendTransaction",sendTx,"")
-	err = client.Call(&txhash1, "personal_sendTransaction",sendTx1,"")
+	//err = client.Call(&txhash1, "personal_sendTransaction",sendTx1,"")
 
 	fmt.Println("eth_blockNumber ", blockNumber)
 	fmt.Println("eth_coinbase ", swc_coinbase)

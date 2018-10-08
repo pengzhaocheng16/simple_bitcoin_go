@@ -8,8 +8,8 @@ import (
 	"math"
 	"fmt"
 	."../boltqueue"
-	"bytes"
 	"math/big"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 const utxoBucket = "chainstate"
@@ -22,29 +22,32 @@ type UTXOSet struct {
 }
 
 // FindSpendableOutputs finds and returns unspent outputs to reference in inputs
-func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,minerCheck bool,spendTxid []byte,pqueue *PQueue) (uint64, map[string][]int) {
+func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,receiverCheck bool,spendTxids map[string]*TXInput,txPQueue *PQueue) (uint64, map[string][]int, map[string][]TXOutput) {
 	unspentOutputs := make(map[string][]int)
+	unspentExtraOutputs := make(map[string][]TXOutput)
 	accumulated := uint64(0)
 
 	log.Println("--start  FindSpendableOutputs ")
 	//queueFile := fmt.Sprintf("%x_tx.db", GetAddressFromPubkeyHash(pubkeyHash))
-	var txPQueue *PQueue
+	var pqueue *PQueue
 	var errcq error
-	if(pqueue != nil){
-		txPQueue = pqueue
+	if(txPQueue != nil){
+		pqueue = txPQueue
 	}else{
+		log.Println("--in  FindSpendableOutputs pqueue nil")
 		queueFile := GenWalletStateDbName(u.Blockchain.NodeId)
-		txPQueue, errcq = NewPQueue(queueFile)
+		pqueue, errcq = NewPQueue(queueFile)
 		if errcq != nil {
 			log.Panic("create queue error",errcq)
 		}
-		defer txPQueue.Close()
+		//defer pqueue.Close()
+		////defer os.Remove(queueFile)
 	}
-	//defer os.Remove(queueFile)
+	defer pqueue.Close()
 
-	qsize, errqs := txPQueue.Size(1)
+	qsize, errqs := pqueue.Size(1)
 	if (errqs != nil) {
-		fmt.Printf("get pending tx queue size error %s \n", errqs)
+		fmt.Printf("get pending tx queue size error %x \n", errqs)
 	}
 	fmt.Printf("pending tx queue size %d \n", qsize)
 
@@ -58,36 +61,67 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,minerCh
 			outs := DeserializeOutputs(v)
 			//ignore pending tx
 			fmt.Printf("UTXO txID %s \n", txID)
-			if(minerCheck||(qsize==0||MineNow_ || !txPQueue.IsExist(1,k))) {
-				//miner check transaction is legal or not
-				fmt.Printf("loop start  spendTxid %x \n",spendTxid)
-				if(minerCheck&&!bytes.Equal(spendTxid,k)){
-					fmt.Printf("is minerCheck continue %d \n", minerCheck)
+			if(receiverCheck||(qsize==0||MineNow_ || !pqueue.IsExist(1,k))) {
+				//receiver check transaction is legal or not
+				fmt.Printf("loop start  spendTxid %x \n",spendTxids)
+				if(receiverCheck && spendTxids[txID] == nil){
+					fmt.Printf("is minerCheck continue %d \n", receiverCheck)
 					continue
 				}
 				for outIdx, out := range outs.Outputs {
 					fmt.Printf("IsLockedWithKey %x \n", pubkeyHash)
-					if out.IsLockedWithKey(pubkeyHash) && accumulated < amount.Uint64() {
+					if out.IsLockedWithKey(pubkeyHash) {
 						fmt.Printf("out.Value %d \n", out.Value)
 						accumulated += uint64(out.Value)
 						unspentOutputs[txID] = append(unspentOutputs[txID], outIdx)
+					}else{
+						unspentExtraOutputs[txID] = append(unspentExtraOutputs[txID], out)
 					}
 				}
+				if accumulated >= amount.Uint64(){
+					break
+				}
 			}else{
-
-				fmt.Println("--->  exist txid: ", txID)
+				//spend tx in pendding outputs
+				if(pqueue.IsExist(1,k)){
+					//witch tx spend it
+					/*txidrow := pqueue.Get(1,k)
+					txid := hex.EncodeToString(txidrow.Bytes())
+					txMsg := pqueue.Get(3,txidrow.Bytes())
+					txSerialized := txMsg.Bytes()
+					txspend := DeserializeTransaction(txSerialized)
+					txspend:
+					for outIdx, out := range txspend.Vout {
+						if(outIdx == 0){
+							continue txspend
+						}
+						fmt.Printf("IsLockedWithKey %x \n", pubkeyHash)
+						if out.IsLockedWithKey(pubkeyHash){
+							fmt.Printf("out.Value %d \n", out.Value)
+							accumulated += uint64(out.Value)
+							unspentOutputs[txid] = append(unspentOutputs[txid], outIdx)
+						}else{
+							unspentExtraOutputs[txid] = append(unspentExtraOutputs[txid], out)
+						}
+					}*/
+					fmt.Println("--->  IsExist txid: ", txID)
+				}
+				fmt.Println("--->  exist txid 1: ", txID)
 			}
 		}
 
 		return nil
 	})
-	//txPQueue.Close()
+
+	//if(txPQueue == nil) {
+	//	pqueue.Close()
+	//}
 	log.Println("--after  FindSpendableOutputs accumulated: %d",accumulated)
 	if err != nil {
 		log.Panic(err)
 	}
 
-	return accumulated, unspentOutputs
+	return accumulated, unspentOutputs,unspentExtraOutputs
 }
 
 // FindUTXO finds UTXO for a public key hash
@@ -195,34 +229,26 @@ func (u UTXOSet) Update(block *Block) {
 
 		for _, tx := range block.Transactions {
 			if tx.IsCoinbase() == false {
-				for _, vin := range tx.Vin {
-					updatedOuts := TXOutputs{}
 
-					fmt.Printf("vin.Txid %x \n", vin.Txid)
-					outs := tx.Vout
+				updatedOuts := TXOutputs{}
 
-					fmt.Printf("len(outs.Outputs) %x \n", len(outs))
-					for outidx, out := range outs {
-						//if outidx != vin.Vout {
-							fmt.Printf("outidx %d \n", outidx)
-							fmt.Printf("vin.Vout %d \n", out.Value)
-							updatedOuts.Outputs = append(updatedOuts.Outputs, out)
-						//}
-					}
-					fmt.Printf("len(updatedOuts.Outputs) %x \n", len(updatedOuts.Outputs))
+				outs := tx.Vout
 
+				fmt.Printf("--> len(outs.Outputs) %x \n", len(outs))
+				for outidx, out := range outs {
+					//if outidx != vin.Vout {
+					fmt.Printf("tx.Vout outidx %d \n", outidx)
+					fmt.Printf("tx.Vout Value %d  \n", out.Value)
+					updatedOuts.Outputs = append(updatedOuts.Outputs, out)
+					//}
+				}
+				fmt.Printf("len(updatedOuts.Outputs) %x \n", len(updatedOuts.Outputs))
 
-					if len(updatedOuts.Outputs) != 0 {
-						err := b.Put(tx.ID, updatedOuts.Serialize())
-						if err != nil {
-							log.Panic(err)
-						}
-					}
-					err := b.Delete(vin.Txid)
+				if len(updatedOuts.Outputs) != 0 {
+					err := b.Put(tx.ID, updatedOuts.Serialize())
 					if err != nil {
 						log.Panic(err)
 					}
-
 				}
 			}else{
 
@@ -234,6 +260,20 @@ func (u UTXOSet) Update(block *Block) {
 				err := b.Put(tx.ID, newOutputs.Serialize())
 				if err != nil {
 					log.Panic(err)
+				}
+			}
+		}
+		//in the case spend tx in block
+		for _, tx := range block.Transactions {
+			if tx.IsCoinbase() == false {
+				fmt.Printf("--》len(tx.Vin) %x \n", len(tx.Vin))
+				for _, vin := range tx.Vin {
+
+					fmt.Printf("vin.Txid %x \n", vin.Txid)
+					err := b.Delete(vin.Txid)
+					if err != nil {
+						log.Panic(err)
+					}
 				}
 			}
 		}
@@ -272,12 +312,19 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 				}
 			}
 			//txPQueue.Close()
+			fmt.Println("--bf IsUTXOAmountValid  \n")
 			result = u.IsUTXOAmountValid(tx,txPQueue)
-			//txPQueue, errcq = NewPQueue(queueFile)
-			//if errcq != nil {
-			//	log.Panic("create queue error", errcq)
-			//}
+			//result = u.IsUTXOAmountValid(tx,nil)
+			fmt.Printf("--af IsUTXOAmountValid  result %s \n",result)
+			queueFile := GenWalletStateDbName(u.Blockchain.NodeId)
+			var errcq error
+			txPQueue, errcq = NewPQueue(queueFile)
+			defer txPQueue.Close()
+			if errcq != nil {
+				log.Panic("create queue error", errcq)
+			}
 			if(!result){
+				fmt.Println("--bf result check false  \n")
 				//delete outdated vin txid in database
 				for _,tx1 := range block.Transactions[0:k]{
 					for _,in := range tx1.Vin{
@@ -287,6 +334,7 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 				}
 				return result,9
 			}else{
+				fmt.Println("--bf result check true \n")
 				//txid has used put it in database
 				for _,Vin := range tx.Vin{
 					txPQueue.SetMsg(4,Vin.Txid,Vin.Txid)
@@ -297,7 +345,7 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 			coinbaseReward = tx.Vout[0].Value
 		}
 	}
-	txPQueue.Close()
+	//txPQueue.Close()
 	//fmt.Printf("coinbaseReward %s \n", math.Pow(0.5, math.Floor(float64(block.Height/halfRewardblockCount)))*subsidy )
 	//fmt.Printf("coinbaseReward %s \n", coinbaseReward)
 	//in that block reward timeperiod less than that currenteward
@@ -318,8 +366,12 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 
 func (u UTXOSet) IsUTXOAmountValid(tx *Transaction,pqueue *PQueue) bool{
 	pubKeyHash := HashPubKey(tx.Vin[0].PubKey)
-	acc, _ :=
-		u.FindSpendableOutputs(pubKeyHash, big.NewInt(int64(tx.Vout[0].Value)),true,tx.Vin[0].Txid,pqueue)
+	var spendtxids = map[string]*TXInput{}
+	for _,txin := range tx.Vin{
+		spendtxids[hex.EncodeToString(txin.Txid)] = &txin
+	}
+	acc, _, extraOutputs :=
+		u.FindSpendableOutputs(pubKeyHash, big.NewInt(int64(tx.Vout[0].Value)),true,spendtxids,pqueue)
 	//var acc = 0
 	//UTXOs := UTXOSet.FindUTXO(u,pubKeyHash)
 	//fmt.Printf("len UTXOs %d \n", len(UTXOs))
@@ -328,14 +380,61 @@ func (u UTXOSet) IsUTXOAmountValid(tx *Transaction,pqueue *PQueue) bool{
 	//}
 	var change = uint64(0)
 	if(len(tx.Vout)>1){
-		change = tx.Vout[1].Value
+		for idx,out := range tx.Vout{
+			if(idx>0){
+				change = change + out.Value
+			}
+		}
+	}
+	for _,outs := range extraOutputs {
+		for _,exout := range outs{
+			acc = acc + exout.Value
+		}
 	}
 	if(acc != ( tx.Vout[0].Value+ change)){
-		fmt.Printf("tx.Vin[0].PubKey %d \n", tx.Vin[0].PubKey)
+		fmt.Printf("tx.Vin[0].PubKey %x \n", pubKeyHash)
 		fmt.Printf("acc %d \n", acc)
 		fmt.Printf("Vout %d \n", tx.Vout[0].Value)
 		fmt.Printf("change %d \n", change)
 		return false
 	}
 	return true
+}
+
+func (u *UTXOSet)GetTxInOuts(from common.Address,to common.Address,amount *big.Int,nodeID string)([]TXInput,[]TXOutput,error){
+	defer u.Blockchain.Db.Close()
+	var pubKeyHash []byte = from.Bytes()
+	acc, validOutputs,extraOutputs := u.FindSpendableOutputs(pubKeyHash, amount,false,nil,nil)
+
+	if acc < amount.Uint64() {
+		return nil,nil,ErrNotEnoughFunds
+	}
+
+	var inputs []TXInput
+	var outputs []TXOutput
+	// Build a list of inputs
+	for txid, outs := range validOutputs {
+		txID, err := hex.DecodeString(txid)
+		if err != nil {
+			log.Panic(err)
+		}
+		for _, out := range outs {
+			//input := TXInput{txID, out, nil, wallet.PublicKey}
+			input := TXInput{txID, big.NewInt(int64(out)), nil, nil}
+			inputs = append(inputs, input)
+		}
+	}
+
+	// Build a list of outputs
+	//from := fmt.Sprintf("%s", GetAddressFromPubkeyHash(pubKeyHash))
+	fromstr := fmt.Sprintf("%s", from)
+	tostr := fmt.Sprintf("%s", to)
+	outputs = append(outputs, *NewTXOutput(amount, tostr))
+	if acc > amount.Uint64() {
+		outputs = append(outputs, *NewTXOutput(big.NewInt(int64(acc-amount.Uint64())), fromstr)) // a change
+	}
+	for _,txouts := range extraOutputs{
+		outputs = append(outputs,txouts...)
+	}
+	return inputs,outputs,nil
 }

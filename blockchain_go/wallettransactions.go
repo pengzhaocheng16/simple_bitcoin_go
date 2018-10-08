@@ -14,7 +14,7 @@ type WalletTransactions struct {
 	DB *bolt.DB
 }
 
-func (uts *WalletTransactions) InitDB(chainId,wallet string) error {
+func (uts *WalletTransactions) InitDB(chainId,address string) error {
 	dbFile := GenWalletStateDbName(chainId)
 	fmt.Printf("wallet transaction file %s\n",dbFile)
 	if dbExists(dbFile) {
@@ -29,7 +29,7 @@ func (uts *WalletTransactions) InitDB(chainId,wallet string) error {
 	uts.DB = db;
 
 	err = uts.DB.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket([]byte(wallet+"_"+walletTransactionsBucket))
+		_, err := tx.CreateBucket([]byte(address+"_"+walletTransactionsBucket))
 
 		if err != nil {
 			return err
@@ -52,15 +52,15 @@ func (uts *UnapprovedTransactions) GetCount() (int, error) {
 }
 */
 
-func (uts *WalletTransactions) TruncateDB(wallet string) error {
+func (uts *WalletTransactions) TruncateDB(address string) error {
 	err := uts.DB.Update(func(tx *bolt.Tx) error {
-		err := tx.DeleteBucket([]byte(wallet+"_"+walletTransactionsBucket))
+		err := tx.DeleteBucket([]byte(address+"_"+walletTransactionsBucket))
 
 		if err != nil && err != bolt.ErrBucketNotFound {
 			return err
 		}
 
-		_, err = tx.CreateBucket([]byte(wallet+"_"+walletTransactionsBucket))
+		_, err = tx.CreateBucket([]byte(address+"_"+walletTransactionsBucket))
 
 		if err != nil {
 			return err
@@ -74,11 +74,11 @@ func (uts *WalletTransactions) TruncateDB(wallet string) error {
 }
 
 // returns transaction by ID if it exists
-func (uts *WalletTransactions) GetTransaction(txID []byte,wallet string) ([]byte, error) {
+func (uts *WalletTransactions) GetTransaction(txID []byte,address string) ([]byte, error) {
 	var txBytes []byte
 
 	err := uts.DB.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(wallet+"_"+walletTransactionsBucket))
+		b := tx.Bucket([]byte(address+"_"+walletTransactionsBucket))
 
 		if b == nil {
 			return NewDBIsNotReadyError()
@@ -95,9 +95,9 @@ func (uts *WalletTransactions) GetTransaction(txID []byte,wallet string) ([]byte
 }
 
 // Add transaction record
-func (uts *WalletTransactions) PutTransaction(txID []byte, txdata []byte,wallet string) error {
+func (uts *WalletTransactions) PutTransaction(txID []byte, txdata []byte,address string) error {
 	return uts.DB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(wallet+"_"+walletTransactionsBucket))
+		b := tx.Bucket([]byte(address+"_"+walletTransactionsBucket))
 		if(b.Get([]byte("counter"))==nil){
 			cb := make([]byte, 8)
 			binary.BigEndian.PutUint64(cb, 0)
@@ -121,9 +121,9 @@ func (uts *WalletTransactions) PutTransaction(txID []byte, txdata []byte,wallet 
 }
 
 // delete transation from DB
-func (uts *WalletTransactions) DeleteTransaction(txID []byte,wallet string) error {
+func (uts *WalletTransactions) DeleteTransaction(txID []byte,address string) error {
 	return uts.DB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(wallet+"_"+walletTransactionsBucket))
+		b := tx.Bucket([]byte(address+"_"+walletTransactionsBucket))
 
 		if b == nil {
 			return NewDBIsNotReadyError()
@@ -135,11 +135,11 @@ func (uts *WalletTransactions) DeleteTransaction(txID []byte,wallet string) erro
 
 
 // returns transaction nonce  if it exists
-func (uts *WalletTransactions) GetTransactionNonce(wallet string) (uint64, error) {
+func (uts *WalletTransactions) GetTransactionNonce(address string) (uint64, error) {
 	var nonce uint64
 
 	err := uts.DB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(wallet+"_"+walletTransactionsBucket))
+		b := tx.Bucket([]byte(address+"_"+walletTransactionsBucket))
 
 		if b == nil {
 			return NewDBIsNotReadyError()

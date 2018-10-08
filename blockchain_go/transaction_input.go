@@ -1,11 +1,14 @@
 package core
 
-import "bytes"
+import (
+	"bytes"
+	"math/big"
+)
 
 // TXInput represents a transaction input
 type TXInput struct {
 	Txid      []byte
-	Vout      int
+	Vout      *big.Int
 	Signature []byte
 	PubKey    []byte
 }

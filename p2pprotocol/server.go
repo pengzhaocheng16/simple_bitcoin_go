@@ -27,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 
 	"../blockchain_go/rawdb"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 const protocol = "tcp"
@@ -366,8 +367,15 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 
 	valid,reason := bc.IsBlockValid(block)
 	if( valid ){
+		log.Println("--start block valid op")
 		if(!p.knownBlocks.Has(hex.EncodeToString(block.Hash.Bytes()))){
+			log.Println("--in block valid bf block added ")
 			bc.AddBlock(block)
+
+			events := bc.Events([]*core.Block{block})
+			bc.PostChainEvents(events,nil)
+
+			log.Println("--in block valid af block added ")
 			//confirm transaction from wallet
 			//wallets1, err := core.NewWallets(bc.NodeId)
 			//if err != nil {
@@ -377,11 +385,12 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 			//for _,walletAddress := range walletaddrs1{
 				confirmTx(block,bc.NodeId)
 			//}
+			log.Println("--end block valid af block confirmed ")
 
 			p.lock.RLock()
+			//defer p.lock.RUnlock()
 			//Manager.CurrTd = block.Height
 			p.knownBlocks.Add(hex.EncodeToString(block.Hash.Bytes()))
-			//defer p.lock.RUnlock()
 			p.lock.RUnlock()
 		}
 
@@ -740,6 +749,7 @@ func HandleConnection(p *Peer,command Command, bc *core.Blockchain) {
 	//	log.Panic(err)
 	//}
 	//command := bytesToCommand(request[:commandLength])
+	defer bc.Db.Close()
 	fmt.Printf("Received %s command\n", command.Command)
 
 	switch command.Command {
@@ -952,6 +962,16 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 		//BigestTd:td,
 		BestTd: make(chan *big.Int),
 	}
+
+
+	var TxPoolConfig = core.DefaultTxPoolConfig
+	chainConfig:= &params.ChainConfig{
+		ChainID:big.NewInt(1),
+	}//gen.Config
+	bc := core.NewBlockchain(nodeID)
+	defer bc.Db.Close()
+	Manager.txPool = core.NewTxPool(TxPoolConfig, chainConfig,bc)
+
 	//defer bc.Db.Close()
 	// start sync handlers
 	////go pm.syncer()
@@ -1213,10 +1233,11 @@ func enqueueVersion(myLastHash []byte){
 
 //confirm transaction from wallet (not tranasaction from other node)
 //TODO if there is blockchain conflict (blockchain fork) then the data is not valid need to delete all comfirmed uncomfirmed transactions
-func confirmTx(newblock *core.Block,chainId string) bool {
+func confirmTx(newblock *core.Block,nodeID string) bool {
 	//queueFile := fmt.Sprintf("%x_tx.db", wallet.GetAddress())
-	queueFile := core.GenWalletStateDbName(chainId)
+	queueFile := core.GenWalletStateDbName(nodeID)
 	txPQueue, err := NewPQueue(queueFile)
+	log.Println("-- af NewPQueue \n")
 	if err != nil {
 		log.Panic("create queue error", err)
 	}
@@ -1243,10 +1264,10 @@ func confirmTx(newblock *core.Block,chainId string) bool {
 			blockHash = append(blockHash[:], newblock.Hash.Bytes()...)
 			fmt.Printf("  blockHash %d :\n", blockHash)
 			var newiddata = make([]byte,0)
-			newiddata =append(newiddata,counter...)
-			newiddata =append(newiddata,blockHash...)
+			newiddata = append(newiddata,counter...)
+			newiddata = append(newiddata,blockHash...)
 			var zero = make([]byte,160)
-			newiddata =append(newiddata,zero...)
+			newiddata = append(newiddata,zero...)
 			fmt.Printf("  newiddata %d :\n", newiddata)
 
 			fmt.Printf(" len newiddata %d :\n", len(newiddata))

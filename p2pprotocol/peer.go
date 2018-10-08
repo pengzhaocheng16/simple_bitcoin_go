@@ -125,10 +125,11 @@ type ProtocolManager struct {
 	Peers      *peerSet
 	Bc *core.Blockchain
 	TxMempool map[string]*core.Transaction
+	txPool *core.TxPool
 	BigestTd *big.Int
 	BestTd chan *big.Int
 
-	mu           sync.RWMutex
+	Mu           sync.RWMutex
 	//CurrTd *big.Int
 }
 
@@ -270,7 +271,7 @@ func msgHandler(peer *p2p.Peer, ws p2p.MsgReadWriter) error {
 		bc1 := core.NewBlockchain(nodeID)
 
 		HandleConnection(p,myMessage,bc1)
-		bc1.Db.Close()
+		//bc1.Db.Close()
 	}
 
 	return nil

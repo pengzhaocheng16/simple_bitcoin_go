@@ -15,6 +15,14 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"../blockchain_go/rawdb"
 	."../boltqueue"
+	/*"time"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/common/mclock"
+	"sync/atomic"
+	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/core/state"*/
+	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const dbFile = "blockchain_%s.db"
@@ -32,6 +40,10 @@ type Blockchain struct {
 	GenesisHash common.Hash
 	tip common.Hash
 	Db  *bolt.DB
+
+	chainHeadFeed event.Feed
+	scope         event.SubscriptionScope
+
 	NodeId string
 }
 
@@ -65,23 +77,27 @@ func CreateBlockchain(address, nodeID string) *Blockchain {
 	err = db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte(blocksBucket))
 		if err != nil {
-			log.Panic(err)
+			//log.Panic(err)
+			return err
 		}
 
 		err = b.Put(genesis.Hash.Bytes(), genesis.Serialize())
 		if err != nil {
-			log.Panic(err)
+			//log.Panic(err)
+			return err
 		}
 
 		err = b.Put([]byte("l"), genesis.Hash.Bytes())
 		if err != nil {
-			log.Panic(err)
+			//log.Panic(err)
+			return err
 		}
 		tip = genesis.Hash
 
 		err = b.Put([]byte("g"), genesis.Hash.Bytes())
 		if err != nil {
-			log.Panic(err)
+			//log.Panic(err)
+			return err
 		}
 		genesisHash = genesis.Hash
 		return nil
@@ -91,13 +107,19 @@ func CreateBlockchain(address, nodeID string) *Blockchain {
 	}
 	rawdb.WriteCanonicalHash(db,genesis.Hash,0)
 
-	bc := Blockchain{genesisHash,tip, db,nodeID}
-	return &bc
+	bc := &Blockchain{
+		GenesisHash:genesisHash,
+		tip:tip,
+		Db:db,
+		NodeId:nodeID,
+	}
+	return bc
 }
 
 // NewBlockchain creates a new Blockchain with genesis Block
 func NewBlockchain(nodeID string) *Blockchain {
 	var dbFile = genBlockChainDbName(nodeID)
+	fmt.Printf("Blockchain file %s\n",dbFile)
 	if dbExists(dbFile) == false {
 		fmt.Println("No existing blockchain found. Create one first.")
 		os.Exit(1)
@@ -122,9 +144,15 @@ func NewBlockchain(nodeID string) *Blockchain {
 		log.Panic(err)
 	}
 
-	bc := Blockchain{genesisHash,tip, db,nodeID}
 
-	return &bc
+	bc := &Blockchain{
+		GenesisHash:genesisHash,
+		tip:tip,
+		Db:db,
+		NodeId:nodeID,
+	}
+
+	return bc
 }
 
 // AddBlock saves the block into the blockchain
@@ -134,13 +162,14 @@ func (bc *Blockchain) AddBlock(block *Block) {
 		blockInDb := b.Get(block.Hash.Bytes())
 
 		if blockInDb != nil {
-			return nil
+			return errors.New("block exist!")
 		}
 
 		blockData := block.Serialize()
 		err := b.Put(block.Hash.Bytes(), blockData)
 		if err != nil {
-			log.Panic(err)
+			//log.Panic(err)
+			return err
 		}
 
 		lastHash := b.Get([]byte("l"))
@@ -150,7 +179,8 @@ func (bc *Blockchain) AddBlock(block *Block) {
 		if block.Height.Cmp(lastBlock.Height) > 0 {
 			err = b.Put([]byte("l"), block.Hash.Bytes())
 			if err != nil {
-				log.Panic(err)
+				//log.Panic(err)
+				return err
 			}
 			bc.tip = block.Hash
 		}
@@ -187,6 +217,7 @@ func (bc *Blockchain) FindTransaction(ID []byte) (Transaction, error) {
 // FindUTXO finds all unspent transaction outputs and returns transactions with spent outputs removed
 func (bc *Blockchain) FindUTXO() map[string]TXOutputs {
 	UTXO := make(map[string]TXOutputs)
+	//TODO put spentTXOs in bucket
 	spentTXOs := make(map[string][]int)
 	bci := bc.Iterator()
 
@@ -202,7 +233,10 @@ func (bc *Blockchain) FindUTXO() map[string]TXOutputs {
 				if spentTXOs[txID] != nil {
 					for _, spentOutIdx := range spentTXOs[txID] {
 						if spentOutIdx == outIdx {
-							continue Outputs
+							//continue Outputs
+							outs := make([]TXOutput,0)
+							UTXO[txID] = TXOutputs{outs}
+							break Outputs
 						}
 					}
 				}
@@ -211,11 +245,12 @@ func (bc *Blockchain) FindUTXO() map[string]TXOutputs {
 				outs.Outputs = append(outs.Outputs, out)
 				UTXO[txID] = outs
 			}
+		//SpentTXOs:
 
 			if tx.IsCoinbase() == false {
 				for _, in := range tx.Vin {
 					inTxID := hex.EncodeToString(in.Txid)
-					spentTXOs[inTxID] = append(spentTXOs[inTxID], in.Vout)
+					spentTXOs[inTxID] = append(spentTXOs[inTxID], int(in.Vout.Int64()))
 				}
 			}
 		}
@@ -286,6 +321,33 @@ func (bc *Blockchain) GetBlock(blockHash []byte) (Block, error) {
 	}
 
 	return block, nil
+}
+
+// GetBlock finds a block by its hash and returns it
+func (bc *Blockchain) GetBlockByHashNumber(blockHash []byte,number uint64) (*Block, error) {
+	var block Block
+
+	err := bc.Db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+
+		blockData := b.Get(blockHash)
+
+		if blockData == nil {
+			return errors.New("Block is not found.")
+		}
+
+		block = *DeserializeBlock(blockData)
+
+		return nil
+	})
+	if err != nil {
+		return &block, err
+	}
+	if block.Height.Uint64() != number {
+		return &block, errors.New("ERROR:block number not same")
+	}
+
+	return &block, nil
 }
 
 // GetBlockHashes returns a list of hashes of all the blocks after a block in the chain
@@ -464,7 +526,7 @@ func (bc *Blockchain)IsBlockValid(newBlock *Block) (bool,int) {
 	}
 	if(oldBlock==nil){
 		fmt.Printf("newBlock.Hash:%x",newBlock.Hash)
-		log.Panic("last block inconsistent with new block!lastHashS:"+lastHashS)
+		log.Panic("ERROR:last block inconsistent with new block!lastHashS:"+lastHashS)
 		reason = 1
 	}
 	//fmt.Printf("oldBlock.Height %n \n", oldBlock.Height)
@@ -505,7 +567,9 @@ func (bc *Blockchain)IsBlockValid(newBlock *Block) (bool,int) {
 	if errcq != nil {
 		log.Panic("create queue error", errcq)
 	}
+	defer txPQueue.Close()
 	valid,reason := UTXOSet.VerifyTxTimeLineAndUTXOAmount(oldBlock.Timestamp,newBlock,txPQueue)
+	log.Printf("--af  VerifyTxTimeLineAndUTXOAmount valid: %s \n",valid)
 	if(!valid){
 		//reason = 6
 		return false,reason
@@ -518,6 +582,7 @@ func (bc *Blockchain)IsBlockValid(newBlock *Block) (bool,int) {
 			}
 		}
 	}
+	//txPQueue.Close()
 	for _,tx := range newBlock.Transactions{
 		if(!VeryfyFromToAddress(tx)){
 			reason = 7
@@ -669,38 +734,249 @@ func (bc *Blockchain)GetBalance(address common.Address, nodeID string)*big.Int{
 	return balance
 }
 
-func (bc *Blockchain)GetTxInOuts(from common.Address,to common.Address,amount *big.Int,nodeID string)([]TXInput,[]TXOutput,error){
-	uTXOSet := UTXOSet{bc}
-	defer bc.Db.Close()
-	var pubKeyHash []byte = from.Bytes()
-	acc, validOutputs := uTXOSet.FindSpendableOutputs(pubKeyHash, amount,false,nil,nil)
 
-	if acc < amount.Uint64() {
-		return nil,nil,ErrNotEnoughFunds
+// InsertChain attempts to insert the given batch of blocks in to the canonical
+// chain or, otherwise, create a fork. If an error is returned it will return
+// the index number of the failing block as well an error describing what went
+// wrong.
+//
+// After insertion is done, all accumulated events will be fired.
+/*func (bc *Blockchain) InsertChain(chain []Block) (int, error) {
+	n, events, logs, err := bc.insertChain(chain)
+	bc.PostChainEvents(events, logs)
+	return n, err
+}
+
+// insertChain will execute the actual chain insertion and event aggregation. The
+// only reason this method exists as a separate one is to make locking cleaner
+// with deferred statements.
+func (bc *Blockchain) insertChain(chain []Block) (int, []interface{}, []*types.Log, error) {
+	// Sanity check that we have something meaningful to import
+	if len(chain) == 0 {
+		return 0, nil, nil, nil
 	}
+	// Do a sanity check that the provided chain is actually ordered and linked
+	for i := 1; i < len(chain); i++ {
+		if chain[i].NumberU64() != chain[i-1].NumberU64()+1 || chain[i].ParentHash() != chain[i-1].Hash() {
+			// Chain broke ancestry, log a messge (programming error) and skip insertion
+			log.Error("Non contiguous block insert", "number", chain[i].Number(), "hash", chain[i].Hash(),
+				"parent", chain[i].ParentHash(), "prevnumber", chain[i-1].Number(), "prevhash", chain[i-1].Hash())
 
-	var inputs []TXInput
-	var outputs []TXOutput
-	// Build a list of inputs
-	for txid, outs := range validOutputs {
-		txID, err := hex.DecodeString(txid)
+			return 0, nil, nil, fmt.Errorf("non contiguous insert: item %d is #%d [%x…], item %d is #%d [%x…] (parent [%x…])", i-1, chain[i-1].NumberU64(),
+				chain[i-1].Hash().Bytes()[:4], i, chain[i].NumberU64(), chain[i].Hash().Bytes()[:4], chain[i].ParentHash().Bytes()[:4])
+		}
+	}
+	// Pre-checks passed, start the full block imports
+	bc.wg.Add(1)
+	defer bc.wg.Done()
+
+	bc.chainmu.Lock()
+	defer bc.chainmu.Unlock()
+
+	// A queued approach to delivering events. This is generally
+	// faster than direct delivery and requires much less mutex
+	// acquiring.
+	var (
+		stats         = insertStats{startTime: mclock.Now()}
+		events        = make([]interface{}, 0, len(chain))
+		lastCanon     *types.Block
+		coalescedLogs []*types.Log
+	)
+	// Start the parallel header verifier
+	headers := make([]*types.Header, len(chain))
+	seals := make([]bool, len(chain))
+
+	for i, block := range chain {
+		headers[i] = block.Header()
+		seals[i] = true
+	}
+	abort, results := bc.engine.VerifyHeaders(bc, headers, seals)
+	defer close(abort)
+
+	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
+	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
+
+	// Iterate over the blocks and insert when the verifier permits
+	for i, block := range chain {
+		// If the chain is terminating, stop processing blocks
+		if atomic.LoadInt32(&bc.procInterrupt) == 1 {
+			log.Debug("Premature abort during blocks processing")
+			break
+		}
+		// If the header is a banned one, straight out abort
+		if BadHashes[block.Hash()] {
+			bc.reportBlock(block, nil, ErrBlacklistedHash)
+			return i, events, coalescedLogs, ErrBlacklistedHash
+		}
+		// Wait for the block's verification to complete
+		bstart := time.Now()
+
+		err := <-results
+		if err == nil {
+			err = bc.Validator().ValidateBody(block)
+		}
+		switch {
+		case err == ErrKnownBlock:
+			// Block and state both already known. However if the current block is below
+			// this number we did a rollback and we should reimport it nonetheless.
+			if bc.CurrentBlock().NumberU64() >= block.NumberU64() {
+				stats.ignored++
+				continue
+			}
+
+		case err == consensus.ErrFutureBlock:
+			// Allow up to MaxFuture second in the future blocks. If this limit is exceeded
+			// the chain is discarded and processed at a later time if given.
+			max := big.NewInt(time.Now().Unix() + maxTimeFutureBlocks)
+			if block.Time().Cmp(max) > 0 {
+				return i, events, coalescedLogs, fmt.Errorf("future block: %v > %v", block.Time(), max)
+			}
+			bc.futureBlocks.Add(block.Hash(), block)
+			stats.queued++
+			continue
+
+		case err == consensus.ErrUnknownAncestor && bc.futureBlocks.Contains(block.ParentHash()):
+			bc.futureBlocks.Add(block.Hash(), block)
+			stats.queued++
+			continue
+
+		case err == consensus.ErrPrunedAncestor:
+			// Block competing with the canonical chain, store in the db, but don't process
+			// until the competitor TD goes above the canonical TD
+			currentBlock := bc.CurrentBlock()
+			localTd := bc.GetTd(currentBlock.Hash(), currentBlock.NumberU64())
+			externTd := new(big.Int).Add(bc.GetTd(block.ParentHash(), block.NumberU64()-1), block.Difficulty())
+			if localTd.Cmp(externTd) > 0 {
+				if err = bc.WriteBlockWithoutState(block, externTd); err != nil {
+					return i, events, coalescedLogs, err
+				}
+				continue
+			}
+			// Competitor chain beat canonical, gather all blocks from the common ancestor
+			var winner []*types.Block
+
+			parent := bc.GetBlock(block.ParentHash(), block.NumberU64()-1)
+			for !bc.HasState(parent.Root()) {
+				winner = append(winner, parent)
+				parent = bc.GetBlock(parent.ParentHash(), parent.NumberU64()-1)
+			}
+			for j := 0; j < len(winner)/2; j++ {
+				winner[j], winner[len(winner)-1-j] = winner[len(winner)-1-j], winner[j]
+			}
+			// Import all the pruned blocks to make the state available
+			bc.chainmu.Unlock()
+			_, evs, logs, err := bc.insertChain(winner)
+			bc.chainmu.Lock()
+			events, coalescedLogs = evs, logs
+
+			if err != nil {
+				return i, events, coalescedLogs, err
+			}
+
+		case err != nil:
+			bc.reportBlock(block, nil, err)
+			return i, events, coalescedLogs, err
+		}
+		// Create a new statedb using the parent block and report an
+		// error if it fails.
+		var parent *types.Block
+		if i == 0 {
+			parent = bc.GetBlock(block.ParentHash(), block.NumberU64()-1)
+		} else {
+			parent = chain[i-1]
+		}
+		state, err := state.New(parent.Root(), bc.stateCache)
 		if err != nil {
-			log.Panic(err)
+			return i, events, coalescedLogs, err
 		}
-		for _, out := range outs {
-			//input := TXInput{txID, out, nil, wallet.PublicKey}
-			input := TXInput{txID, out, nil, nil}
-			inputs = append(inputs, input)
+		// Process block using the parent state as reference point.
+		receipts, logs, usedGas, err := bc.processor.Process(block, state, bc.vmConfig)
+		if err != nil {
+			bc.reportBlock(block, receipts, err)
+			return i, events, coalescedLogs, err
 		}
-	}
+		// Validate the state using the default validator
+		err = bc.Validator().ValidateState(block, parent, state, receipts, usedGas)
+		if err != nil {
+			bc.reportBlock(block, receipts, err)
+			return i, events, coalescedLogs, err
+		}
+		proctime := time.Since(bstart)
 
-	// Build a list of outputs
-	//from := fmt.Sprintf("%s", GetAddressFromPubkeyHash(pubKeyHash))
-	fromstr := fmt.Sprintf("%s", from)
-	tostr := fmt.Sprintf("%s", to)
-	outputs = append(outputs, *NewTXOutput(amount, tostr))
-	if acc > amount.Uint64() {
-		outputs = append(outputs, *NewTXOutput(big.NewInt(int64(acc-amount.Uint64())), fromstr)) // a change
+		// Write the block to the chain and get the status.
+		status, err := bc.WriteBlockWithState(block, receipts, state)
+		if err != nil {
+			return i, events, coalescedLogs, err
+		}
+		switch status {
+		case CanonStatTy:
+			log.Debug("Inserted new block", "number", block.Number(), "hash", block.Hash(), "uncles", len(block.Uncles()),
+				"txs", len(block.Transactions()), "gas", block.GasUsed(), "elapsed", common.PrettyDuration(time.Since(bstart)))
+
+			coalescedLogs = append(coalescedLogs, logs...)
+			blockInsertTimer.UpdateSince(bstart)
+			events = append(events, ChainEvent{block, block.Hash(), logs})
+			lastCanon = block
+
+			// Only count canonical blocks for GC processing time
+			bc.gcproc += proctime
+
+		case SideStatTy:
+			log.Debug("Inserted forked block", "number", block.Number(), "hash", block.Hash(), "diff", block.Difficulty(), "elapsed",
+				common.PrettyDuration(time.Since(bstart)), "txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()))
+
+			blockInsertTimer.UpdateSince(bstart)
+			events = append(events, ChainSideEvent{block})
+		}
+		stats.processed++
+		stats.usedGas += usedGas
+
+		cache, _ := bc.stateCache.TrieDB().Size()
+		stats.report(chain, i, cache)
 	}
-	return inputs,outputs,nil
+	// Append a single chain head event if we've progressed the chain
+	if lastCanon != nil && bc.CurrentBlock().Hash() == lastCanon.Hash() {
+		events = append(events, ChainHeadEvent{lastCanon})
+	}
+	return 0, events, coalescedLogs, nil
+}
+*/
+
+// PostChainEvents iterates over the events generated by a chain insertion and
+// posts them into the event feed.
+// TODO: Should not expose PostChainEvents. The chain events should be posted in WriteBlock.
+func (bc *Blockchain) PostChainEvents(events []interface{}, logs []*types.Log) {
+	// post event logs for further processing
+	/*if logs != nil {
+		bc.logsFeed.Send(logs)
+	}*/
+	for _, event := range events {
+		switch ev := event.(type) {
+		/*case ChainEvent:
+			bc.chainFeed.Send(ev)
+*/
+		case ChainHeadEvent:
+			bc.chainHeadFeed.Send(ev)
+/*
+		case ChainSideEvent:
+			bc.chainSideFeed.Send(ev)
+		}*/
+		}
+	}
+}
+
+func (bc *Blockchain) Events(blocks []*Block)[]interface{} {
+
+	events        := make([]interface{}, 0, len(blocks))
+	// Append a single chain head event if we've progressed the chain
+	lastCanon := blocks[len(blocks)-1]
+	if lastCanon != nil && bc.CurrentBlock().Hash == lastCanon.Hash {
+		events = append(events, ChainHeadEvent{lastCanon})
+	}
+	return events
+}
+
+// SubscribeChainHeadEvent registers a subscription of ChainHeadEvent.
+func (bc *Blockchain) SubscribeChainHeadEvent(ch chan<- ChainHeadEvent) event.Subscription {
+	return bc.scope.Track(bc.chainHeadFeed.Subscribe(ch))
 }
