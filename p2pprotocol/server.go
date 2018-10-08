@@ -1281,8 +1281,12 @@ func confirmTx(newblock *core.Block,nodeID string) bool {
 	var txidold []byte
 	var bytelen int
 	vall := txPQueue.GetAll(2)
-	for _, txiddata0 := range vall {
+	for txid, txiddata0 := range vall {
 		fmt.Printf(" len newiddata0 %d :\n", txiddata0)
+		if len(txiddata0.Bytes())<193{
+			fmt.Printf(" len txid %x :\n", txid)
+			continue
+		}
 		txiddata := txiddata0.Bytes()[1:192]
 
 		hash1 := hex.EncodeToString(txiddata[:32])

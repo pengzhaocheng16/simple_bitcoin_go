@@ -61,7 +61,7 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,receive
 			outs := DeserializeOutputs(v)
 			//ignore pending tx
 			fmt.Printf("UTXO txID %s \n", txID)
-			if(receiverCheck||(qsize==0||MineNow_ || !pqueue.IsExist(1,k))) {
+			if(receiverCheck||(qsize==0||MineNow_ || !pqueue.IsKeyExist(1,k))) {
 				//receiver check transaction is legal or not
 				fmt.Printf("loop start  spendTxid %x \n",spendTxids)
 				if(receiverCheck && spendTxids[txID] == nil){
@@ -74,8 +74,13 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,receive
 						fmt.Printf("out.Value %d \n", out.Value)
 						accumulated += uint64(out.Value)
 						unspentOutputs[txID] = append(unspentOutputs[txID], outIdx)
-					}else{
-						unspentExtraOutputs[txID] = append(unspentExtraOutputs[txID], out)
+					}
+				}
+				if len(unspentOutputs[txID])>0{
+					for _, out := range outs.Outputs {
+						if !out.IsLockedWithKey(pubkeyHash) {
+							unspentExtraOutputs[txID] = append(unspentExtraOutputs[txID], out)
+						}
 					}
 				}
 				if accumulated >= amount.Uint64(){
@@ -83,7 +88,7 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,receive
 				}
 			}else{
 				//spend tx in pendding outputs
-				if(pqueue.IsExist(1,k)){
+				if(pqueue.IsKeyExist(1,k)){
 					//witch tx spend it
 					/*txidrow := pqueue.Get(1,k)
 					txid := hex.EncodeToString(txidrow.Bytes())
@@ -386,6 +391,7 @@ func (u UTXOSet) IsUTXOAmountValid(tx *Transaction,pqueue *PQueue) bool{
 			}
 		}
 	}
+	fmt.Printf("len(extraOutputs) %d \n", len(extraOutputs))
 	for _,outs := range extraOutputs {
 		for _,exout := range outs{
 			acc = acc + exout.Value
