@@ -582,7 +582,6 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 
 	Manager.TxMempool[hex.EncodeToString(tx.ID)] = &tx
 
-
 	p.MarkTransaction(tx.ID)
 
 	var tnxs core.Transactions

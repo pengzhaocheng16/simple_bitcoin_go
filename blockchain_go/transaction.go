@@ -511,8 +511,20 @@ func VerifyTx(tx Transaction,bc *Blockchain)bool{
 		//log.Panic("ERROR: Invalid transaction:sign")
 		valid1 = false
 	}
+
+	queueFile := GenWalletStateDbName(bc.NodeId)
+	pqueue, errcq := NewPQueue(queueFile)
+	if errcq != nil {
+		log.Panic("create queue error",errcq)
+	}
+	defer pqueue.Close()
+	//in case of double spend
+	for _,vin := range tx.Vin{
+		pqueue.SetMsg(1,vin.Txid,tx.ID)
+	}
+
 	UTXOSet := UTXOSet{bc}
-	if(tx.IsCoinbase()==false&&!UTXOSet.IsUTXOAmountValid(&tx,nil)){
+	if(tx.IsCoinbase()==false&&!UTXOSet.IsUTXOAmountValid(&tx,pqueue)){
 		//log.Panic("ERROR: Invalid transaction:amount")
 		valid2 = false
 	}
