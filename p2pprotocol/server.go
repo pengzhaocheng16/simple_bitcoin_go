@@ -615,13 +615,29 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 			}
 
 			fmt.Println("==>VerifyTx ")
+			queueFile := core.GenWalletStateDbName(bc.NodeId)
+			pqueue, errcq := NewPQueue(queueFile)
+			if errcq != nil {
+				log.Panic("create queue error",errcq)
+			}
+			defer pqueue.Close()
+			var sizeTotal float64 = 0
 			for id := range Manager.TxMempool {
+				//in case of double spend
+				for _, vin := range tx.Vin {
+					pqueue.SetMsg(1, vin.Txid, tx.ID)
+				}
 				//verify transaction
-				if(core.VerifyTx(tx,bc)) {
+				//block txs size limit to 4M
+				if(core.VerifyTx(tx,bc) && sizeTotal < 4 * 1024 *1024) {
+					sizeTotal = sizeTotal + float64(Manager.TxMempool[id].Size())
 					txs = append(txs, Manager.TxMempool[id])
 				}
 			}
-			if len(txs) < 2 && len(miningAddress) > 0 {
+			if len(txs)>1 && len(txs) < 2 && len(miningAddress) > 0 {
+				for _, vin := range txs[0].Vin {
+					pqueue.DeleteMsg(1, vin.Txid)
+				}
 				return
 			}
 
@@ -633,6 +649,7 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 			fmt.Println("==>NewCoinbaseTX ")
 			cbTx := core.NewCoinbaseTX(miningAddress, "",bc.NodeId)
 			txs = append(txs, cbTx)
+
 
 			newBlock := bc.MineBlock(txs)
 			if(newBlock != nil){
