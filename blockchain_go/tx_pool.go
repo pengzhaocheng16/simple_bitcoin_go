@@ -186,6 +186,9 @@ func NewTxPool(config TxPoolConfig,chainconfig *params.ChainConfig,bc *Blockchai
 
 	pool.reset(nil, bc.CurrentBlock())
 
+	// Subscribe events from blockchain
+	pool.chainHeadSub = pool.Bc.SubscribeChainHeadEvent(pool.chainHeadCh)
+
 	// Start the event loop and return
 	pool.wg.Add(1)
 	go pool.loop()
@@ -234,8 +237,8 @@ func (pool *TxPool) loop() {
 				pool.mu.Unlock()
 			}
 			// Be unsubscribed due to system stopped
-		/*case <-pool.chainHeadSub.Err():
-			return*/
+		case <-pool.chainHeadSub.Err():
+			return
 
 			// Handle stats reporting ticks
 		case <-report.C:
@@ -605,6 +608,83 @@ func (pool *TxPool) Content() (map[common.Address]Transactions, map[common.Addre
 }
 
 
+// Pending retrieves all currently processable transactions, groupped by origin
+// account and sorted by nonce. The returned transaction set is a copy and can be
+// freely modified by calling code.
+func (pool *TxPool) Pending() (map[common.Address]Transactions, error) {
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	pending := make(map[common.Address]Transactions)
+	for addr, list := range pool.pending {
+		pending[addr] = list.Flatten()
+	}
+	return pending, nil
+}
+
+// local retrieves all currently known local transactions, groupped by origin
+// account and sorted by nonce. The returned transaction set is a copy and can be
+// freely modified by calling code.
+func (pool *TxPool) local() map[common.Address]Transactions {
+	txs := make(map[common.Address]Transactions)
+	for addr := range pool.locals.accounts {
+		if pending := pool.pending[addr]; pending != nil {
+			txs[addr] = append(txs[addr], pending.Flatten()...)
+		}
+		if queued := pool.queue[addr]; queued != nil {
+			txs[addr] = append(txs[addr], queued.Flatten()...)
+		}
+	}
+	return txs
+}
+
+// validateTx checks whether a transaction is valid according to the consensus
+// rules and adheres to some heuristic limits of the local node (price and size).
+func (pool *TxPool) validateTx(tx *Transaction, local bool) error {
+	// Heuristic limit, reject transactions over 32KB to prevent DOS attacks
+	if tx.Size() > 32*1024 {
+		return ErrOversizedData
+	}
+	// Transactions can't be negative. This may never happen using RLP decoded
+	// transactions but may occur if you create a transaction using the RPC.
+	if tx.Value().Sign() < 0 {
+		return ErrNegativeValue
+	}
+	// Ensure the transaction doesn't exceed the current block limit gas.
+	/*if pool.currentMaxGas < tx.Gas() {
+		return ErrGasLimit
+	}*/
+	// Make sure the transaction is signed properly
+	from, err := Sender(pool.signer, tx)
+	if err != nil {
+		return ErrInvalidSender
+	}
+	// Drop non-local transactions under our own minimal accepted gas price
+	/*local = local || pool.locals.contains(from) // account may be local even if the transaction arrived from the network
+	if !local && pool.gasPrice.Cmp(tx.GasPrice()) > 0 {
+		return ErrUnderpriced
+	}*/
+	// Ensure the transaction adheres to nonce ordering
+	//if pool.currentState.GetNonce(from) > tx.Nonce() {
+	if nonce,_ := GetPoolNonce(pool.Bc.NodeId,from.String());nonce > tx.Nonce() {
+		return ErrNonceTooLow
+	}
+	/*// Transactor should have enough funds to cover the costs
+	// cost == V + GP * GL
+	if pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
+		return ErrInsufficientFunds
+	}
+	intrGas, err := IntrinsicGas(tx.Data(), tx.To() == nil, pool.homestead)
+	if err != nil {
+		return err
+	}
+	if tx.Gas() < intrGas {
+		return ErrIntrinsicGas
+	}*/
+	return nil
+}
+
+
 // AddLocal enqueues a single transaction into the pool if it is valid, marking
 // the sender as a local one in the mean time, ensuring it goes around the local
 // pricing constraints.
@@ -811,52 +891,6 @@ func (pool *TxPool) add(tx *Transaction, local bool) (bool, error) {
 	log.Trace("Pooled new future transaction", "hash", hash, "from", from, "to", tx.To())
 	return replace, nil
 	//return true, nil
-}
-
-// validateTx checks whether a transaction is valid according to the consensus
-// rules and adheres to some heuristic limits of the local node (price and size).
-func (pool *TxPool) validateTx(tx *Transaction, local bool) error {
-	// Heuristic limit, reject transactions over 32KB to prevent DOS attacks
-	if tx.Size() > 32*1024 {
-		return ErrOversizedData
-	}
-	// Transactions can't be negative. This may never happen using RLP decoded
-	// transactions but may occur if you create a transaction using the RPC.
-	if tx.Value().Sign() < 0 {
-		return ErrNegativeValue
-	}
-	// Ensure the transaction doesn't exceed the current block limit gas.
-	/*if pool.currentMaxGas < tx.Gas() {
-		return ErrGasLimit
-	}*/
-	// Make sure the transaction is signed properly
-	from, err := Sender(pool.signer, tx)
-	if err != nil {
-		return ErrInvalidSender
-	}
-	// Drop non-local transactions under our own minimal accepted gas price
-	/*local = local || pool.locals.contains(from) // account may be local even if the transaction arrived from the network
-	if !local && pool.gasPrice.Cmp(tx.GasPrice()) > 0 {
-		return ErrUnderpriced
-	}*/
-	// Ensure the transaction adheres to nonce ordering
-	//if pool.currentState.GetNonce(from) > tx.Nonce() {
-	if nonce,_ := GetPoolNonce(pool.Bc.NodeId,from.String());nonce > tx.Nonce() {
-		return ErrNonceTooLow
-	}
-	/*// Transactor should have enough funds to cover the costs
-	// cost == V + GP * GL
-	if pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
-		return ErrInsufficientFunds
-	}
-	intrGas, err := IntrinsicGas(tx.Data(), tx.To() == nil, pool.homestead)
-	if err != nil {
-		return err
-	}
-	if tx.Gas() < intrGas {
-		return ErrIntrinsicGas
-	}*/
-	return nil
 }
 
 // enqueueTx inserts a new transaction into the non-executable transaction queue.

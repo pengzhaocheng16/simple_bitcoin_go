@@ -16,7 +16,6 @@ import (
 	"strings"
 	"math/big"
 	"github.com/ethereum/go-ethereum/common"
-	"math/rand"
 	"os"
 	."../boltqueue"
 	"gopkg.in/fatih/set.v0"
@@ -27,7 +26,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 
 	"../blockchain_go/rawdb"
-	"github.com/ethereum/go-ethereum/params"
 )
 
 const protocol = "tcp"
@@ -368,12 +366,11 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 	valid,reason := bc.IsBlockValid(block)
 	if( valid ){
 		log.Println("--start block valid op")
+		events := bc.Events([]*core.Block{block})
+		bc.PostChainEvents(events,nil)
 		if(!p.knownBlocks.Has(hex.EncodeToString(block.Hash.Bytes()))){
 			log.Println("--in block valid bf block added ")
 			bc.AddBlock(block)
-
-			events := bc.Events([]*core.Block{block})
-			bc.PostChainEvents(events,nil)
 
 			log.Println("--in block valid af block added ")
 			//confirm transaction from wallet
@@ -401,7 +398,7 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 		//fmt.Println("---len(pending) ",len(pending))
 		for _, tx := range pending {
 			//fmt.Println("---syncTransactions ")
-			if(block.HasTransactions(tx.ID)){
+			if block.HasTransactions(tx.ID){
 				delete(Manager.TxMempool, hex.EncodeToString(tx.ID))
 			}
 		}
@@ -562,8 +559,12 @@ func handleGetData(p *Peer,command Command, bc *core.Blockchain) {
 	}
 }
 
+func errResp(code errCode, format string, v ...interface{}) error {
+	return fmt.Errorf("%v - %v", code, fmt.Sprintf(format, v...))
+}
+
 //  broadcast block after txs mined
-func handleTx(p *Peer, command Command, bc *core.Blockchain) {
+func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 	var buff bytes.Buffer
 	var payload tx
 
@@ -575,14 +576,21 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 	}
 
 	txData := payload.Transaction
+	//TODO DeserializeTransaction return tx pointer
 	tx := core.DeserializeTransaction(txData)
-	//tx.SetSize(uint64(len(txData)))
+	if &tx == nil {
+		return errResp(ErrDecode, "transaction %d is nil", 0)
+	}
 
+	//tx.SetSize(uint64(len(txData)))
 	tx.Size()
+
+	p.MarkTransaction(tx.ID)
 
 	Manager.TxMempool[hex.EncodeToString(tx.ID)] = &tx
 
-	p.MarkTransaction(tx.ID)
+	txs := []*core.Transaction{&tx}
+	Manager.txPool.AddRemotes(txs)
 
 	var tnxs core.Transactions
 	tnxs = append(tnxs, &tx)
@@ -638,12 +646,12 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 				for _, vin := range txs[0].Vin {
 					pqueue.DeleteMsg(1, vin.Txid)
 				}
-				return
+				return errResp(1, "transactions not enough" )
 			}
 
 			if len(txs) == 0 {
 				fmt.Println("All transactions are invalid! Waiting for new ones...")
-				return
+				return errResp(2, "transactions empty" )
 			}
 
 			fmt.Println("==>NewCoinbaseTX ")
@@ -680,6 +688,7 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) {
 			}
 		}
 	}
+	return nil
 }
 
 func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
@@ -945,6 +954,15 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 			log.Fatalf("service %s: registration failed: %v", id, err)
 		}
 	}
+	// Restart the stack a few times and check successful service restarts
+	//for i := 0; i < 2; i++ {
+	//	if err := stack.Restart(nil); err != nil {
+	//		log.Fatalf("iter %d: failed to restart stack: %v", i, err)
+	//	}
+	//}
+	//if  len(started) != 3 {
+	//	log.Fatalf("running/started mismatch: have %v/%d, want true/4", running, started)
+	//}
 
 	err = stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
 		fullNode, err := New(ctx,conf)
@@ -955,15 +973,7 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 		log.Fatalf("Failed to register the Ethereum service: %v", err)
 	}
 	StartNode(stack,running)
-	// Restart the stack a few times and check successful service restarts
-	//for i := 0; i < 2; i++ {
-	//	if err := stack.Restart(nil); err != nil {
-	//		log.Fatalf("iter %d: failed to restart stack: %v", i, err)
-	//	}
-	//}
-	//if  len(started) != 3 {
-	//	log.Fatalf("running/started mismatch: have %v/%d, want true/4", running, started)
-	//}
+
 
 	//bc := core.NewBlockchain(nodeID)
 	//fmt.Println("af NewBlockchain:")
@@ -980,13 +990,6 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 	}
 
 
-	var TxPoolConfig = core.DefaultTxPoolConfig
-	chainConfig:= &params.ChainConfig{
-		ChainID:big.NewInt(1),
-	}//gen.Config
-	bc := core.NewBlockchain(nodeID)
-	defer bc.Db.Close()
-	Manager.txPool = core.NewTxPool(TxPoolConfig, chainConfig,bc)
 
 	//defer bc.Db.Close()
 	// start sync handlers
@@ -1038,156 +1041,6 @@ func nodeIsKnown(addr string) bool {
 	}
 
 	return false
-}
-
-
-// BroadcastTxs will propagate a batch of transactions to all peers which are not known to
-// already have the given transaction.
-func (pm *ProtocolManager) BroadcastTxs(txs core.Transactions) {
-	var txset = make(map[*Peer]core.Transactions)
-
-	// Broadcast transactions to a batch of peers not knowing about it
-	for _, tx := range txs {
-		peers := pm.Peers.PeersWithoutTx(tx.ID)
-		log.Println("---len(PeersWithoutTx)   ",len(peers))
-		for _, peer := range peers {
-			txset[peer] = append(txset[peer], tx)
-		}
-		log.Println("Broadcast transaction", "hash", tx.Hash(), "recipients", len(peers))
-	}
-	// FIXME include this again: peers = peers[:int(math.Sqrt(float64(len(peers))))]
-	for peer, txs := range txset {
-		peer.AsyncSendTransactions(txs)
-	}
-}
-
-/*
-// BroadcastBlock will either propagate a block to a subset of it's peers, or
-// will only announce it's availability (depending what's requested).
-func (pm *ProtocolManager) BroadcastBlock(block *core.Block, propagate bool) {
-	hash := block.Hash
-	peers := pm.Peers.PeersWithoutBlock(hash)
-
-	// If propagation is requested, send to a subset of the peer
-	if propagate {
-		// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
-		var td *big.Int
-		if parent,err := pm.blockchain.GetBlock(block.PrevBlockHash); &parent != nil &&err == nil {
-			//td = new(big.Int).Add(block.Difficulty, pm.blockchain.GetTd(block.PrevBlockHash))
-			td = block.Height
-		} else {
-			log.Println("Propagating dangling block", "number", block.Height, "hash", hash)
-			return
-		}
-		// Send the block to a subset of our peers
-		transfer := peers[:int(math.Sqrt(float64(len(peers))))]
-		for _, peer := range transfer {
-			peer.AsyncSendNewBlock(block, td)
-		}
-		log.Println("Propagated block", "hash", hash, "recipients", len(transfer), "duration", common.PrettyDuration(time.Since(block.ReceivedAt)))
-		return
-	}
-	// Otherwise if the block is indeed in out own chain, announce it
-	//if pm.blockchain.HasBlock(hash, block.NumberU64()) {
-	//	for _, peer := range peers {
-	//		peer.AsyncSendNewBlockHash(block)
-	//	}
-	//	log.Trace("Announced block", "hash", hash, "recipients", len(peers), "duration", common.PrettyDuration(time.Since(block.ReceivedAt)))
-	//}
-}*/
-
-
-// syncTransactions starts sending all currently pending transactions to the given peer.
-func (pm *ProtocolManager) syncTransactions(p *Peer) {
-	var txs core.Transactions
-
-	pending := pm.TxMempool
-	//fmt.Println("---len(pending) ",len(pending))
-	for _, batch := range pending {
-		//fmt.Println("---syncTransactions ")
-		txs = append(txs, batch)
-	}
-	if len(txs) == 0 {
-		return
-	}
-	select {
-	case pm.txsyncCh <- &txsync{p, txs}:
-	case <-pm.quitSync:
-	}
-}
-
-
-// txsyncLoop takes care of the initial transaction sync for each new
-// connection. When a new peer appears, we relay all currently pending
-// transactions. In order to minimise egress bandwidth usage, we send
-// the transactions in small packs to one peer at a time.
-func (pm *ProtocolManager) txsyncLoop() {
-	var (
-		pending = make(map[discover.NodeID]*txsync)
-		sending = false               // whether a send is active
-		pack    = new(txsync)         // the pack that is being sent
-		done    = make(chan error, 1) // result of the send
-	)
-
-	// send starts a sending a pack of transactions from the sync.
-	send := func(s *txsync) {
-		// Fill pack with transactions up to the target size.
-		size := common.StorageSize(0)
-		pack.p = s.p
-		pack.txs = pack.txs[:0]
-		for i := 0; i < len(s.txs) && size < txsyncPackSize; i++ {
-			pack.txs = append(pack.txs, s.txs[i])
-			size += s.txs[i].Size()
-		}
-		// Remove the transactions that will be sent.
-		s.txs = s.txs[:copy(s.txs, s.txs[len(pack.txs):])]
-		if len(s.txs) == 0 {
-			delete(pending, s.p.ID())
-		}
-		// Send the pack in the background.
-		fmt.Println("---txsyncLoop len(pack.txs) ",len(pack.txs),"--",size)
-		s.p.Log().Trace("Sending batch of transactions", "count", len(pack.txs), "bytes", size)
-		sending = true
-		go func() { done <- pack.p.SendTransactions(pack.txs) }()
-	}
-
-	// pick chooses the next pending sync.
-	pick := func() *txsync {
-		if len(pending) == 0 {
-			return nil
-		}
-		n := rand.Intn(len(pending)) + 1
-		for _, s := range pending {
-			if n--; n == 0 {
-				return s
-			}
-		}
-		return nil
-	}
-
-	for {
-		select {
-		case s := <-pm.txsyncCh:
-			fmt.Println("---txsyncLoop ")
-			pending[s.p.ID()] = s
-			if !sending {
-				send(s)
-			}
-		case err := <-done:
-			sending = false
-			// Stop tracking peers that cause send failures.
-			if err != nil {
-				pack.p.Log().Debug("Transaction send failed", "err", err)
-				delete(pending, pack.p.ID())
-			}
-			// Schedule the next send.
-			if s := pick(); s != nil {
-				send(s)
-			}
-		case <-pm.quitSync:
-			return
-		}
-	}
 }
 
 

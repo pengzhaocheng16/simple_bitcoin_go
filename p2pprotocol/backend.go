@@ -14,6 +14,7 @@ import (
 	"../p2p"
 	"github.com/ethereum/go-ethereum/common"
 	"fmt"
+	"math/big"
 )
 
 type SwarmChain struct {
@@ -24,6 +25,7 @@ type SwarmChain struct {
 	// Handlers
 	peers           *peerSet
 	txPool          map[string]*core.Transaction
+	txsPool         *core.TxPool
 	blockchain      *core.Blockchain
 	protocolManager *ProtocolManager
 	// DB interfaces
@@ -51,6 +53,15 @@ func New(ctx *node.ServiceContext,config *node.Config) (*SwarmChain, error) {
 		etherbase:config.Etherbase,
 		nodeID:config.NodeID,
 	}
+
+	var TxPoolConfig = core.DefaultTxPoolConfig
+	chainConfig:= &params.ChainConfig{
+		ChainID:big.NewInt(1),
+	}//gen.Config
+	bc := core.NewBlockchain(config.NodeID)
+	defer bc.Db.Close()
+	swc.txsPool = core.NewTxPool(TxPoolConfig, chainConfig,bc)
+
 	swc.ApiBackend = &SwcAPIBackend{swc}
 
 	return swc, nil
@@ -151,6 +162,26 @@ func (s *SwarmChain) SetEtherbase(etherbase common.Address) {
 // Start implements node.Service, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
 func (s *SwarmChain) Start(srvr *p2p.Server) error {
+	/*// Start the bloom bits servicing goroutines
+	s.startBloomHandlers()
+
+	// Start the RPC service
+	s.netRPCService = ethapi.NewPublicNetAPI(srvr, s.NetVersion())
+*/
+	// Figure out a max peers count based on the server limits
+	maxPeers := srvr.MaxPeers
+	/*if s.config.LightServ > 0 {
+		if s.config.LightPeers >= srvr.MaxPeers {
+			return fmt.Errorf("invalid peer config: light peer count (%d) >= total peer count (%d)", s.config.LightPeers, srvr.MaxPeers)
+		}
+		maxPeers -= s.config.LightPeers
+	}*/
+
+	// Start the networking layer and the light server if requested
+	s.protocolManager.Start(maxPeers)
+	/*if s.lesServer != nil {
+		s.lesServer.Start(srvr)
+	}*/
 	return nil
 }
 
@@ -160,7 +191,19 @@ func (s *SwarmChain) Stop() error {
 
 	s.eventMux.Stop()
 
+	//s.bloomIndexer.Close()
+	//s.blockchain.Stop()
+	s.protocolManager.Stop()
+	/*if s.lesServer != nil {
+		s.lesServer.Stop()
+	}*/
+	s.txsPool.Stop()
+	//s.miner.Stop()
+	s.eventMux.Stop()
+
+	//s.chainDb.Close()
 	//close(s.shutdownChan)
+
 
 	return nil
 }

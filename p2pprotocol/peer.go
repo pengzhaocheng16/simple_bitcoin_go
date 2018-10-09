@@ -9,6 +9,7 @@ import (
 	"log"
 	//"github.com/ethereum/go-ethereum/crypto"
 	//"github.com/ethereum/go-ethereum/p2p"
+	//"github.com/ethereum/go-ethereum/log"
 	"../blockchain_go"
 	"../p2p"
 	"../p2p/nat"
@@ -16,6 +17,8 @@ import (
 	"os"
 	"encoding/hex"
 	"github.com/ethereum/go-ethereum/common"
+	"math/rand"
+	"../p2p/discover"
 )
 
 const (
@@ -118,19 +121,28 @@ type txsync struct {
 }
 
 type ProtocolManager struct {
+	//networkId uint64
+
 	// channels for fetcher, syncer, txsyncLoop
 	//newPeerCh   chan *Peer
 	txsyncCh    chan *txsync
 	quitSync    chan struct{}
 	Peers      *peerSet
 	Bc *core.Blockchain
+
 	TxMempool map[string]*core.Transaction
-	txPool *core.TxPool
+	txPool *core.TxPool//*txPool
+	maxPeers    int
+
 	BigestTd *big.Int
 	BestTd chan *big.Int
 
 	Mu           sync.RWMutex
 	//CurrTd *big.Int
+
+	// wait group is used for graceful shutdowns during downloading
+	// and processing
+	//wg sync.WaitGroup
 }
 
 func (pm *ProtocolManager) removePeer(id string,blockchain *core.Blockchain) {
@@ -152,6 +164,201 @@ func (pm *ProtocolManager) removePeer(id string,blockchain *core.Blockchain) {
 	}
 
 	blockchain.Db.Close()
+}
+
+
+// BroadcastTxs will propagate a batch of transactions to all peers which are not known to
+// already have the given transaction.
+func (pm *ProtocolManager) BroadcastTxs(txs core.Transactions) {
+	var txset = make(map[*Peer]core.Transactions)
+
+	// Broadcast transactions to a batch of peers not knowing about it
+	for _, tx := range txs {
+		peers := pm.Peers.PeersWithoutTx(tx.ID)
+		log.Println("---len(PeersWithoutTx)   ",len(peers))
+		for _, peer := range peers {
+			txset[peer] = append(txset[peer], tx)
+		}
+		log.Println("Broadcast transaction", "hash", tx.Hash(), "recipients", len(peers))
+	}
+	// FIXME include this again: peers = peers[:int(math.Sqrt(float64(len(peers))))]
+	for peer, txs := range txset {
+		peer.AsyncSendTransactions(txs)
+	}
+}
+
+/*
+// BroadcastBlock will either propagate a block to a subset of it's peers, or
+// will only announce it's availability (depending what's requested).
+func (pm *ProtocolManager) BroadcastBlock(block *core.Block, propagate bool) {
+	hash := block.Hash
+	peers := pm.Peers.PeersWithoutBlock(hash)
+
+	// If propagation is requested, send to a subset of the peer
+	if propagate {
+		// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
+		var td *big.Int
+		if parent,err := pm.blockchain.GetBlock(block.PrevBlockHash); &parent != nil &&err == nil {
+			//td = new(big.Int).Add(block.Difficulty, pm.blockchain.GetTd(block.PrevBlockHash))
+			td = block.Height
+		} else {
+			log.Println("Propagating dangling block", "number", block.Height, "hash", hash)
+			return
+		}
+		// Send the block to a subset of our peers
+		transfer := peers[:int(math.Sqrt(float64(len(peers))))]
+		for _, peer := range transfer {
+			peer.AsyncSendNewBlock(block, td)
+		}
+		log.Println("Propagated block", "hash", hash, "recipients", len(transfer), "duration", common.PrettyDuration(time.Since(block.ReceivedAt)))
+		return
+	}
+	// Otherwise if the block is indeed in out own chain, announce it
+	//if pm.blockchain.HasBlock(hash, block.NumberU64()) {
+	//	for _, peer := range peers {
+	//		peer.AsyncSendNewBlockHash(block)
+	//	}
+	//	log.Trace("Announced block", "hash", hash, "recipients", len(peers), "duration", common.PrettyDuration(time.Since(block.ReceivedAt)))
+	//}
+}*/
+
+
+// syncTransactions starts sending all currently pending transactions to the given peer.
+func (pm *ProtocolManager) syncTransactions(p *Peer) {
+	var txs core.Transactions
+
+	pending, _ := pm.txPool.Pending()
+	//pending := pm.TxMempool
+	//fmt.Println("---len(pending) ",len(pending))
+	for _, batch := range pending {
+		//fmt.Println("---syncTransactions ")
+		txs = append(txs, batch...)
+		//txs = append(txs, batch)
+	}
+	if len(txs) == 0 {
+		return
+	}
+	select {
+	case pm.txsyncCh <- &txsync{p, txs}:
+	case <-pm.quitSync:
+	}
+}
+
+
+// txsyncLoop takes care of the initial transaction sync for each new
+// connection. When a new peer appears, we relay all currently pending
+// transactions. In order to minimise egress bandwidth usage, we send
+// the transactions in small packs to one peer at a time.
+func (pm *ProtocolManager) txsyncLoop() {
+	var (
+		pending = make(map[discover.NodeID]*txsync)
+		sending = false               // whether a send is active
+		pack    = new(txsync)         // the pack that is being sent
+		done    = make(chan error, 1) // result of the send
+	)
+
+	// send starts a sending a pack of transactions from the sync.
+	send := func(s *txsync) {
+		// Fill pack with transactions up to the target size.
+		size := common.StorageSize(0)
+		pack.p = s.p
+		pack.txs = pack.txs[:0]
+		for i := 0; i < len(s.txs) && size < txsyncPackSize; i++ {
+			pack.txs = append(pack.txs, s.txs[i])
+			size += s.txs[i].Size()
+		}
+		// Remove the transactions that will be sent.
+		s.txs = s.txs[:copy(s.txs, s.txs[len(pack.txs):])]
+		if len(s.txs) == 0 {
+			delete(pending, s.p.ID())
+		}
+		// Send the pack in the background.
+		fmt.Println("---txsyncLoop len(pack.txs) ",len(pack.txs),"--",size)
+		s.p.Log().Trace("Sending batch of transactions", "count", len(pack.txs), "bytes", size)
+		sending = true
+		go func() { done <- pack.p.SendTransactions(pack.txs) }()
+	}
+
+	// pick chooses the next pending sync.
+	pick := func() *txsync {
+		if len(pending) == 0 {
+			return nil
+		}
+		n := rand.Intn(len(pending)) + 1
+		for _, s := range pending {
+			if n--; n == 0 {
+				return s
+			}
+		}
+		return nil
+	}
+
+	for {
+		select {
+		case s := <-pm.txsyncCh:
+			fmt.Println("---txsyncLoop ")
+			pending[s.p.ID()] = s
+			if !sending {
+				send(s)
+			}
+		case err := <-done:
+			sending = false
+			// Stop tracking peers that cause send failures.
+			if err != nil {
+				pack.p.Log().Debug("Transaction send failed", "err", err)
+				delete(pending, pack.p.ID())
+			}
+			// Schedule the next send.
+			if s := pick(); s != nil {
+				send(s)
+			}
+		case <-pm.quitSync:
+			return
+		}
+	}
+}
+
+
+func (pm *ProtocolManager) Start(maxPeers int) {
+	pm.maxPeers = maxPeers
+
+	/*// broadcast transactions
+	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
+	pm.txsSub = pm.txpool.SubscribeNewTxsEvent(pm.txsCh)
+	go pm.txBroadcastLoop()
+
+	// broadcast mined blocks
+	pm.minedBlockSub = pm.eventMux.Subscribe(core.NewMinedBlockEvent{})
+	go pm.minedBroadcastLoop()
+
+	// start sync handlers
+	go pm.syncer()
+	go pm.txsyncLoop()*/
+}
+
+func (pm *ProtocolManager) Stop() {
+	log.Println("Stopping Ethereum protocol")
+
+	//pm.txsSub.Unsubscribe()        // quits txBroadcastLoop
+	//pm.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
+
+	// Quit the sync loop.
+	// After this send has completed, no new peers will be accepted.
+	//pm.noMorePeers <- struct{}{}
+
+	// Quit fetcher, txsyncLoop.
+	close(pm.quitSync)
+
+	// Disconnect existing sessions.
+	// This also closes the gate for any new registrations on the peer set.
+	// sessions which are already established but not added to pm.peers yet
+	// will exit when they try to register.
+	pm.Peers.Close()
+
+	// Wait for all peer handler goroutines and the loops to come down.
+	//pm.wg.Wait()
+
+	log.Println("Ethereum protocol stopped")
 }
 
 func MyProtocol() p2p.Protocol {
@@ -177,7 +384,7 @@ func main() {
 	Manager = &ProtocolManager{
 		//newPeerCh:   make(chan *Peer),
 		txsyncCh:    make(chan *txsync),
-		//quitSync:    make(chan struct{}),
+		quitSync:    make(chan struct{}),
 		Peers:       newPeerSet(),
 	}
 
@@ -203,6 +410,13 @@ func main() {
 }
 
 func msgHandler(peer *p2p.Peer, ws p2p.MsgReadWriter) error {
+	// Ignore maxPeers if this is a trusted peer
+	//TODO: move to manager.handle(peer)
+	if Manager.Peers.Len() >= Manager.maxPeers && !peer.Info().Network.Trusted {
+		return p2p.DiscTooManyPeers
+	}
+
+	// Ignore maxPeers if this is a trusted peer
 	fmt.Println("---protocol start:")
 	p := newPeer(int(1), peer, ws)
 	//Peers[p.id] = p
@@ -324,22 +538,6 @@ func (ps *peerSet) Register(p *Peer) error {
 	return nil
 }
 
-// PeersWithoutTx retrieves a list of peers that do not have a given transaction
-// in their set of known hashes.
-func (ps *peerSet) PeersWithoutTx(hash []byte) []*Peer {
-	ps.lock.RLock()
-	defer ps.lock.RUnlock()
-
-	list := make([]*Peer, 0, len(ps.Peers))
-	for _, p := range ps.Peers {
-		fmt.Println("---------> p.knownTxs.Has:", hex.EncodeToString(hash))
-		if !p.knownTxs.Has(hex.EncodeToString(hash)) {
-			list = append(list, p)
-		}
-	}
-	return list
-}
-
 // Unregister removes a remote peer from the active set, disabling any further
 // actions to/from that particular entity.
 func (ps *peerSet) Unregister(id string) error {
@@ -383,6 +581,56 @@ func (ps *peerSet) Peer(id string) *Peer {
 	return ps.Peers[id]
 }
 
+// Len returns if the current number of peers in the set.
+func (ps *peerSet) Len() int {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+
+	return len(ps.Peers)
+}
+
+// PeersWithoutBlock retrieves a list of peers that do not have a given block in
+// their set of known hashes.
+func (ps *peerSet) PeersWithoutBlock(hash []byte) []*Peer {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+
+	list := make([]*Peer, 0, len(ps.Peers))
+	for _, p := range ps.Peers {
+		if !p.knownBlocks.Has(hex.EncodeToString(hash)) {
+			list = append(list, p)
+		}
+	}
+	return list
+}
+
+// PeersWithoutTx retrieves a list of peers that do not have a given transaction
+// in their set of known hashes.
+func (ps *peerSet) PeersWithoutTx(hash []byte) []*Peer {
+	ps.lock.RLock()
+	defer ps.lock.RUnlock()
+
+	list := make([]*Peer, 0, len(ps.Peers))
+	for _, p := range ps.Peers {
+		fmt.Println("---------> p.knownTxs.Has:", hex.EncodeToString(hash))
+		if !p.knownTxs.Has(hex.EncodeToString(hash)) {
+			list = append(list, p)
+		}
+	}
+	return list
+}
+
+// Close disconnects all peers.
+// No new peers can be registered after Close has returned.
+func (ps *peerSet) Close() {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
+	for _, p := range ps.Peers {
+		p.Disconnect(p2p.DiscQuitting)
+	}
+	ps.closed = true
+}
 
 // MarkTransaction marks a transaction as known for the peer, ensuring that it
 // will never be propagated to this particular peer.
@@ -410,21 +658,6 @@ func (ps *peerSet) BestPeer() *Peer {
 		}
 	}
 	return bestPeer
-}
-
-// PeersWithoutBlock retrieves a list of peers that do not have a given block in
-// their set of known hashes.
-func (ps *peerSet) PeersWithoutBlock(hash []byte) []*Peer {
-	ps.lock.RLock()
-	defer ps.lock.RUnlock()
-
-	list := make([]*Peer, 0, len(ps.Peers))
-	for _, p := range ps.Peers {
-		if !p.knownBlocks.Has(hex.EncodeToString(hash)) {
-			list = append(list, p)
-		}
-	}
-	return list
 }
 
 func (p *Peer) broadcast() {
