@@ -1,5 +1,5 @@
 # swarmcash_go
-simple version of bitcoin blockchain based on ethereum api
+simple version of bitcoin blockchain based on ethereum api 
 welcome code contribution
 
 derived from 
