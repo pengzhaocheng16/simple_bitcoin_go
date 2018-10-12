@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 
 	"../blockchain_go/rawdb"
+	"../p2p/nat"
 )
 
 const protocol = "tcp"
@@ -895,7 +896,7 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 		 EnableMsgEvents: true,
 		 BootstrapNodes:peers,
 		 Name:nodeID,
-		 //NAT:nat.Any(),
+		 NAT:nat.Any(),
 		 ListenAddr:nodeAddress,
 		 Protocols:  []p2p.Protocol{MyProtocol()},
 	 }
