@@ -14,6 +14,7 @@ import (
 
 	"encoding/hex"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/event"
 )
 
 //import "github.com/ethereum/go-ethereum/eth/gasprice"
@@ -184,26 +185,26 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 		defer Manager.Mu.Unlock()
 
 		Manager.TxMempool[hex.EncodeToString(signedTx.ID)] = signedTx
-		// return b.swc.txPool.AddLocal(signedTx)
-		return nil
+		 return b.swc.txPool.AddLocal(signedTx)
+		//return nil
 	}
-/*
-	func (b *SwcAPIBackend) GetPoolTransactions() (types.Transactions, error) {
+
+	func (b *SwcAPIBackend) GetPoolTransactions() (core.Transactions, error) {
 		pending, err := b.swc.txPool.Pending()
 		if err != nil {
 			return nil, err
 		}
-		var txs types.Transactions
+		var txs core.Transactions
 		for _, batch := range pending {
 			txs = append(txs, batch...)
 		}
 		return txs, nil
 	}
 
-	func (b *SwcAPIBackend) GetPoolTransaction(hash common.Hash) *types.Transaction {
+	func (b *SwcAPIBackend) GetPoolTransaction(hash common.Hash) *core.Transaction {
 		return b.swc.txPool.Get(hash)
 	}
-*/
+
 	func (b *SwcAPIBackend) GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error) {
 		//return b.swc.txPool.State().GetNonce(addr), nil
 		return core.GetPoolNonce(b.swc.nodeID,addr.String())
@@ -212,23 +213,23 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 	func (b *SwcAPIBackend) GetNodeId() string{
 		return b.swc.nodeID
 	}
-/*
+
 	func (b *SwcAPIBackend) Stats() (pending int, queued int) {
 		return b.swc.txPool.Stats()
 	}
 
-	func (b *SwcAPIBackend) TxPoolContent() (map[common.Address]types.Transactions, map[common.Address]types.Transactions) {
+	func (b *SwcAPIBackend) TxPoolContent() (map[common.Address]core.Transactions, map[common.Address]core.Transactions) {
 		return b.swc.TxPool().Content()
 	}
 
 	func (b *SwcAPIBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 		return b.swc.TxPool().SubscribeNewTxsEvent(ch)
 	}
-
+/*
 	func (b *SwcAPIBackend) Downloader() *downloader.Downloader {
 		return b.swc.Downloader()
-	}
-	*/
+	}*/
+
 func (b *SwcAPIBackend) ProtocolVersion() int {
 	return b.swc.SwcVersion()
 }

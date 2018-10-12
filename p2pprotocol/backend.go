@@ -24,8 +24,8 @@ type SwarmChain struct {
 	//shutdownChan chan bool
 	// Handlers
 	peers           *peerSet
-	txPool          map[string]*core.Transaction
-	txsPool         *core.TxPool
+	//txMemPool          map[string]*core.Transaction
+	txPool         *core.TxPool
 	blockchain      *core.Blockchain
 	protocolManager *ProtocolManager
 	// DB interfaces
@@ -61,8 +61,8 @@ func New(ctx *node.ServiceContext,config *node.Config,bc *core.Blockchain) (*Swa
 	//bc := core.NewBlockchain(config.NodeID)
 	//defer bc.Db.Close()
 
-	swc.txsPool = core.NewTxPool(TxPoolConfig, chainConfig,bc)
-	Manager.txPool = swc.txsPool
+	swc.txPool = core.NewTxPool(TxPoolConfig, chainConfig,bc)
+	Manager.txPool = swc.txPool
 
 	swc.ApiBackend = &SwcAPIBackend{swc}
 
@@ -126,9 +126,14 @@ func (s *SwarmChain) APIs() []rpc.API {
 		},*/
 	}...)
 }
-func (s *SwarmChain) SwcVersion() int                    { return 1 }
-
+/*
+func (s *SwarmChain) AccountManager() *accounts.Manager  { return s.accountManager }*/
+func (s *SwarmChain) BlockChain() *core.Blockchain       { return s.blockchain }
+func (s *SwarmChain) TxPool() *core.TxPool               { return s.txPool }
 func (s *SwarmChain) EventMux() *event.TypeMux           { return s.eventMux }
+
+func (s *SwarmChain) IsListening() bool                  { return true } // Always listening
+func (s *SwarmChain) SwcVersion() int                    { return 1 }
 
 func (s *SwarmChain) Etherbase() (eb common.Address, err error) {
 	s.lock.RLock()
@@ -199,7 +204,7 @@ func (s *SwarmChain) Stop() error {
 	/*if s.lesServer != nil {
 		s.lesServer.Stop()
 	}*/
-	s.txsPool.Stop()
+	s.txPool.Stop()
 	//s.miner.Stop()
 	s.eventMux.Stop()
 

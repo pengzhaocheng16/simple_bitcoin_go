@@ -599,12 +599,11 @@ func (pool *TxPool) Content() (map[common.Address]Transactions, map[common.Addre
 	for addr, list := range pool.pending {
 		pending[addr] = list.Flatten()
 	}
-	/*queued := make(map[common.Address]Transactions)
+	queued := make(map[common.Address]Transactions)
 	for addr, list := range pool.queue {
 		queued[addr] = list.Flatten()
-	}*/
-	//return pending, queued
-	return pending, nil
+	}
+	return pending, queued
 }
 
 
@@ -746,6 +745,12 @@ func (pool *TxPool) addTxsLocked(txs []*Transaction, local bool) []error {
 		pool.promoteExecutables(addrs)
 	}
 	return errs
+}
+
+// Get returns a transaction if it is contained in the pool
+// and nil otherwise.
+func (pool *TxPool) Get(hash common.Hash) *Transaction {
+	return pool.all.Get(hash)
 }
 
 // removeTx removes a single transaction from the queue, moving all subsequent
