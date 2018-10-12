@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/common"
 	"math/big"
+	"github.com/ethereum/go-ethereum/event"
 )
 
 // Backend interface provides the common API services (that are provided by
@@ -54,17 +55,17 @@ type Backend interface {
 */
 	// TxPool API
 	SendTx(ctx context.Context, signedTx *core.Transaction) error
-	/*
-	GetPoolTransactions() (types.Transactions, error)
-	GetPoolTransaction(txHash common.Hash) *types.Transaction
-	*/
+
+	GetPoolTransactions() (core.Transactions, error)
+	GetPoolTransaction(txHash common.Hash) *core.Transaction
+
 	GetPoolNonce(ctx context.Context,addr common.Address) (uint64, error)
 	GetNodeId()string
-	/*
+
 	Stats() (pending int, queued int)
-	TxPoolContent() (map[common.Address]types.Transactions, map[common.Address]types.Transactions)
+	TxPoolContent() (map[common.Address]core.Transactions, map[common.Address]core.Transactions)
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
-*/
+
 	ChainConfig() *params.ChainConfig
 	CurrentBlock() *core.Block
 }

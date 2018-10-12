@@ -12,9 +12,9 @@ import (
 
 
 
-	"encoding/hex"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/event"
+	"encoding/hex"
 )
 
 //import "github.com/ethereum/go-ethereum/eth/gasprice"
@@ -177,10 +177,10 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 	}
 */
 	func (b *SwcAPIBackend) SendTx(ctx context.Context, signedTx *core.Transaction) error {
-		for _, p := range Manager.Peers.Peers {
+		/*for _, p := range Manager.Peers.Peers {
 			SendTx(p, p.Rw, signedTx)
-		}
-		//TODO pool lock mangement
+		}*/
+		// pool lock mangement
 		Manager.Mu.Lock()
 		defer Manager.Mu.Unlock()
 

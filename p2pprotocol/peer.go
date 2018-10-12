@@ -19,6 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"math/rand"
 	"../p2p/discover"
+	"github.com/ethereum/go-ethereum/event"
 )
 
 const (
@@ -45,6 +46,15 @@ const (
 	maxKnownTxs    = 32768 // Maximum transactions hashes to keep in the known list (prevent DOS)
 	maxKnownBlocks = 1024  // Maximum block hashes to keep in the known list (prevent DOS)
 )
+const (
+	softResponseLimit = 2 * 1024 * 1024 // Target maximum size of returned blocks, headers or node data.
+	estHeaderRlpSize  = 500             // Approximate size of an RLP encoded block header
+
+	// txChanSize is the size of channel listening to NewTxsEvent.
+	// The number is referenced from the size of tx pool.
+	txChanSize = 4096
+)
+
 var (
 	errClosed            = errors.New("peer set is closed")
 	errAlreadyRegistered = errors.New("peer is already registered")
@@ -124,16 +134,20 @@ type ProtocolManager struct {
 	//networkId uint64
 	nodeID string
 
+	TxMempool map[string]*core.Transaction
+	txPool *core.TxPool//*txPool
+	maxPeers    int
+	Bc *core.Blockchain
+
 	// channels for fetcher, syncer, txsyncLoop
 	//newPeerCh   chan *Peer
 	txsyncCh    chan *txsync
 	quitSync    chan struct{}
 	Peers      *peerSet
-	Bc *core.Blockchain
 
-	TxMempool map[string]*core.Transaction
-	txPool *core.TxPool//*txPool
-	maxPeers    int
+	eventMux      *event.TypeMux
+	txsCh         chan core.NewTxsEvent
+	txsSub        event.Subscription
 
 	BigestTd *big.Int
 	BestTd chan *big.Int
@@ -319,28 +333,40 @@ func (pm *ProtocolManager) txsyncLoop() {
 	}
 }
 
+func (pm *ProtocolManager) txBroadcastLoop() {
+	for {
+		select {
+		case event := <-pm.txsCh:
+			pm.BroadcastTxs(event.Txs)
+
+			// Err() channel will be closed when unsubscribing.
+		case <-pm.txsSub.Err():
+			return
+		}
+	}
+}
 
 func (pm *ProtocolManager) Start(maxPeers int) {
 	pm.maxPeers = maxPeers
 
-	/*// broadcast transactions
+	// broadcast transactions
 	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
-	pm.txsSub = pm.txpool.SubscribeNewTxsEvent(pm.txsCh)
+	pm.txsSub = pm.txPool.SubscribeNewTxsEvent(pm.txsCh)
 	go pm.txBroadcastLoop()
+	/*
+		// broadcast mined blocks
+		pm.minedBlockSub = pm.eventMux.Subscribe(core.NewMinedBlockEvent{})
+		go pm.minedBroadcastLoop()
 
-	// broadcast mined blocks
-	pm.minedBlockSub = pm.eventMux.Subscribe(core.NewMinedBlockEvent{})
-	go pm.minedBroadcastLoop()
-
-	// start sync handlers
-	go pm.syncer()
-	go pm.txsyncLoop()*/
+		// start sync handlers
+		go pm.syncer()
+		go pm.txsyncLoop()*/
 }
 
 func (pm *ProtocolManager) Stop() {
 	log.Println("Stopping Ethereum protocol")
 
-	//pm.txsSub.Unsubscribe()        // quits txBroadcastLoop
+	pm.txsSub.Unsubscribe()        // quits txBroadcastLoop
 	//pm.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
 
 	// Quit the sync loop.

@@ -44,12 +44,12 @@ func main() {
 	var from = core.Base58ToCommonAddress([]byte("1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5"))
 	//var to = core.Base58ToCommonAddress([]byte("1Q1oECL9rvC642THhNB6QZMqU55fDieXDK"))
 	var to = core.Base58ToCommonAddress([]byte("1G7EmF7Umd96FLMKh3PhqZCi3bfMzqC4tH"))
-	var from1 = core.Base58ToCommonAddress([]byte("1Q1oECL9rvC642THhNB6QZMqU55fDieXDK"))
+	var from1 = core.Base58ToCommonAddress([]byte("1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5"))
 	var to1 = core.Base58ToCommonAddress([]byte("1G7EmF7Umd96FLMKh3PhqZCi3bfMzqC4tH"))
 
 
 	var nonce = hexutil.Uint64(1)
-	var bigi = new(big.Int).SetInt64(10)
+	var bigi = new(big.Int).SetInt64(5)
 	var value = (*hexutil.Big)(bigi)
 	var data = hexutil.Bytes{}
 	sendTx.From = from

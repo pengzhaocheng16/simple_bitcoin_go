@@ -4,6 +4,8 @@ import (
 	"sync"
 	"errors"
 	"fmt"
+	"math"
+	"math/big"
 	"github.com/boltdb/bolt"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -14,8 +16,8 @@ import (
 	//"github.com/ethereum/go-ethereum/core/state"
 	//"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/event"
-	"math"
-	"math/big"
+	"gopkg.in/karalabe/cookiejar.v2/collections/prque"
+	"sort"
 )
 
 const TxPoolBucket = "TxPool"
@@ -67,8 +69,8 @@ var (
 	// Metrics for the pending pool
 	pendingDiscardCounter   = metrics.NewRegisteredCounter("txpool/pending/discard", nil)
 	pendingReplaceCounter   = metrics.NewRegisteredCounter("txpool/pending/replace", nil)
-	/*pendingRateLimitCounter = metrics.NewRegisteredCounter("txpool/pending/ratelimit", nil) // Dropped due to rate limiting
-	*/pendingNofundsCounter   = metrics.NewRegisteredCounter("txpool/pending/nofunds", nil)   // Dropped due to out-of-funds
+	pendingRateLimitCounter = metrics.NewRegisteredCounter("txpool/pending/ratelimit", nil) // Dropped due to rate limiting
+	pendingNofundsCounter   = metrics.NewRegisteredCounter("txpool/pending/nofunds", nil)   // Dropped due to out-of-funds
 
 	// Metrics for the queued pool
 	queuedDiscardCounter   = metrics.NewRegisteredCounter("txpool/queued/discard", nil)
@@ -994,12 +996,12 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 	if len(promoted) > 0 {
 		go pool.txFeed.Send(NewTxsEvent{promoted})
 	}
-	// If the pending limit is overflown, start equalizing allowances
+	// ***If the pending limit is overflown, start equalizing allowances
 	pending := uint64(0)
 	for _, list := range pool.pending {
 		pending += uint64(list.Len())
 	}
-	/*if pending > pool.config.GlobalSlots {
+	if pending > pool.config.GlobalSlots {
 		pendingBeforeCap := pending
 		// Assemble a spam order to penalize large transactors first
 		spammers := prque.New()
@@ -1027,13 +1029,14 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 						list := pool.pending[offenders[i]]
 						for _, tx := range list.Cap(list.Len() - 1) {
 							// Drop the transaction from the global pools too
-							hash := tx.Hash()
+							hash := tx.CommonHash()
 							pool.all.Remove(hash)
-							pool.priced.Removed()
+							//pool.priced.Removed()
 
 							// Update the account nonce to the dropped transaction
-							if nonce := tx.Nonce(); pool.pendingState.GetNonce(offenders[i]) > nonce {
-								pool.pendingState.SetNonce(offenders[i], nonce)
+							if nonce := tx.Nonce(); pool.pendingState[offenders[i]] > nonce {
+								//pool.pendingState.SetNonce(offenders[i], nonce)
+								pool.pendingState[offenders[i]] = nonce
 							}
 							log.Trace("Removed fairness-exceeding pending transaction", "hash", hash)
 						}
@@ -1049,13 +1052,13 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 					list := pool.pending[addr]
 					for _, tx := range list.Cap(list.Len() - 1) {
 						// Drop the transaction from the global pools too
-						hash := tx.Hash()
+						hash := tx.CommonHash()
 						pool.all.Remove(hash)
-						pool.priced.Removed()
+						//pool.priced.Removed()
 
 						// Update the account nonce to the dropped transaction
-						if nonce := tx.Nonce(); pool.pendingState.GetNonce(addr) > nonce {
-							pool.pendingState.SetNonce(addr, nonce)
+						if nonce := tx.Nonce(); pool.pendingState[addr] > nonce {
+							pool.pendingState[addr] = nonce
 						}
 						log.Trace("Removed fairness-exceeding pending transaction", "hash", hash)
 					}
@@ -1064,13 +1067,13 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 			}
 		}
 		pendingRateLimitCounter.Inc(int64(pendingBeforeCap - pending))
-	}*/
-	// If we've queued more transactions than the hard limit, drop oldest ones
+	}
+	// ***If we've queued more transactions than the hard limit, drop oldest ones
 	queued := uint64(0)
 	for _, list := range pool.queue {
 		queued += uint64(list.Len())
 	}
-	/*if queued > pool.config.GlobalQueue {
+	if queued > pool.config.GlobalQueue {
 		// Sort all accounts with queued transactions by heartbeat
 		addresses := make(addresssByHeartbeat, 0, len(pool.queue))
 		for addr := range pool.queue {
@@ -1090,7 +1093,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 			// Drop all transactions if they are less than the overflow
 			if size := uint64(list.Len()); size <= drop {
 				for _, tx := range list.Flatten() {
-					pool.removeTx(tx.Hash(), true)
+					pool.removeTx(tx.CommonHash(), true)
 				}
 				drop -= size
 				queuedRateLimitCounter.Inc(int64(size))
@@ -1099,12 +1102,12 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 			// Otherwise drop only last few transactions
 			txs := list.Flatten()
 			for i := len(txs) - 1; i >= 0 && drop > 0; i-- {
-				pool.removeTx(txs[i].Hash(), true)
+				pool.removeTx(txs[i].CommonHash(), true)
 				drop--
 				queuedRateLimitCounter.Inc(1)
 			}
 		}
-	}*/
+	}
 }
 
 
@@ -1154,6 +1157,19 @@ func (pool *TxPool) demoteUnexecutables() {
 		}
 	}
 }
+///////////////////////////////////////////
+
+// addressByHeartbeat is an account address tagged with its last activity timestamp.
+type addressByHeartbeat struct {
+	address   common.Address
+	heartbeat time.Time
+}
+
+type addresssByHeartbeat []addressByHeartbeat
+
+func (a addresssByHeartbeat) Len() int           { return len(a) }
+func (a addresssByHeartbeat) Less(i, j int) bool { return a[i].heartbeat.Before(a[j].heartbeat) }
+func (a addresssByHeartbeat) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
 // accountSet is simply a set of addresses to check for existence, and a signer
 // capable of deriving addresses from transactions.
