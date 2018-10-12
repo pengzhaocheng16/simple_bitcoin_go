@@ -41,13 +41,13 @@ type SwarmChain struct {
 	nodeID string
 }
 
-
 // New creates a new SwarmChain object
-func New(ctx *node.ServiceContext,config *node.Config) (*SwarmChain, error) {
+func New(ctx *node.ServiceContext,config *node.Config,bc *core.Blockchain) (*SwarmChain, error) {
 
 	swc := &SwarmChain{
 		//blockchain:bc,
 		//chainDb:        chainDb,
+		protocolManager:Manager,
 		eventMux:       ctx.EventMux,
 		//shutdownChan:   make(chan bool),
 		etherbase:config.Etherbase,
@@ -58,9 +58,11 @@ func New(ctx *node.ServiceContext,config *node.Config) (*SwarmChain, error) {
 	chainConfig:= &params.ChainConfig{
 		ChainID:big.NewInt(1),
 	}//gen.Config
-	bc := core.NewBlockchain(config.NodeID)
-	defer bc.Db.Close()
+	//bc := core.NewBlockchain(config.NodeID)
+	//defer bc.Db.Close()
+
 	swc.txsPool = core.NewTxPool(TxPoolConfig, chainConfig,bc)
+	Manager.txPool = swc.txsPool
 
 	swc.ApiBackend = &SwcAPIBackend{swc}
 

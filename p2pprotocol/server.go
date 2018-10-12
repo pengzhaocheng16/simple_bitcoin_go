@@ -394,14 +394,14 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 		time := time.Now()
 		block.ReceivedAt = time
 
-		pending := Manager.TxMempool
+		/*pending := Manager.TxMempool
 		//fmt.Println("---len(pending) ",len(pending))
 		for _, tx := range pending {
 			//fmt.Println("---syncTransactions ")
 			if block.HasTransactions(tx.ID){
 				delete(Manager.TxMempool, hex.EncodeToString(tx.ID))
 			}
-		}
+		}*/
 		//Manager.BroadcastBlock(block,true)
 	}else{
 		fmt.Printf("Block not Valid reason %d  %x\n",reason,block.Hash)
@@ -587,7 +587,7 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 
 	p.MarkTransaction(tx.ID)
 
-	Manager.TxMempool[hex.EncodeToString(tx.ID)] = &tx
+	//Manager.TxMempool[hex.EncodeToString(tx.ID)] = &tx
 
 	txs := []*core.Transaction{&tx}
 	Manager.txPool.AddRemotes(txs)
@@ -941,6 +941,7 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 	started := make(map[string]bool)
 	stopped := make(map[string]bool)
 
+	//fmt.Println("af NewBlockchain:")
 	for id, maker := range services {
 		id := id // Closure for the constructor
 		constructor := func(*node.ServiceContext) (node.Service, error) {
@@ -964,22 +965,12 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 	//	log.Fatalf("running/started mismatch: have %v/%d, want true/4", running, started)
 	//}
 
-	err = stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		fullNode, err := New(ctx,conf)
+	bc := core.NewBlockchain(nodeID)
+	defer bc.Db.Close()
 
-		return fullNode, err
-	})
-	if err != nil {
-		log.Fatalf("Failed to register the Ethereum service: %v", err)
-	}
-	StartNode(stack,running)
-
-
-	//bc := core.NewBlockchain(nodeID)
-	//fmt.Println("af NewBlockchain:")
 	//td,_:= bc.GetBestHeight()
-	//bc.Db.Close()
 	Manager = &ProtocolManager{
+		nodeID:nodeID,
 		Peers:       newPeerSet(),
 		//Bc:bc,
 		TxMempool:make(map[string]*core.Transaction),
@@ -989,6 +980,15 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 		BestTd: make(chan *big.Int),
 	}
 
+	err = stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
+		fullNode, err := New(ctx,conf,bc)
+
+		return fullNode, err
+	})
+	if err != nil {
+		log.Fatalf("Failed to register the Ethereum service: %v", err)
+	}
+	StartNode(stack,running)
 
 
 	//defer bc.Db.Close()

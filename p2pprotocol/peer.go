@@ -122,6 +122,7 @@ type txsync struct {
 
 type ProtocolManager struct {
 	//networkId uint64
+	nodeID string
 
 	// channels for fetcher, syncer, txsyncLoop
 	//newPeerCh   chan *Peer
@@ -422,7 +423,8 @@ func msgHandler(peer *p2p.Peer, ws p2p.MsgReadWriter) error {
 	//Peers[p.id] = p
 
 	fmt.Println("--- bf NewBlockchain:")
-	nodeID := os.Getenv("NODE_ID")
+	//nodeID := os.Getenv("NODE_ID")
+	nodeID := Manager.nodeID
 	bc := core.NewBlockchain(nodeID)
 
 	fmt.Println("--- bf Peers.Register:")

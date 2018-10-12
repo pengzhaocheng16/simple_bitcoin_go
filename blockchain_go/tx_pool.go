@@ -217,7 +217,7 @@ func (pool *TxPool) loop() {
 	// Track the previous head headers for transaction reorgs
 	head := pool.Bc.CurrentBlock()
 
-	 pool.Bc.Db.Close()
+	pool.Bc.Db.Close()
 	// Keep waiting for and reacting to the various events
 	for {
 		select {

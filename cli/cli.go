@@ -35,11 +35,12 @@ func (cli *CLI) Run() {
 	cli.validateArgs()
 
 	nodeID := os.Getenv("NODE_ID")
-	//nodeID := "localhost:2000"
+
 
 	if nodeID == "" {
-		fmt.Printf("NODE_ID env. var is not set!")
-		os.Exit(1)
+		fmt.Println("NODE_ID env. var is not set!set default value localhost:2000")
+		nodeID = "localhost:2000"
+		//os.Exit(1)
 	}
 
 	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
@@ -151,13 +152,12 @@ func (cli *CLI) Run() {
 
 	// Get address from localmachine
 	if startNodeCmd.Parsed() {
-		nodeID := os.Getenv("NODE_ID")
-		//nodeID := "localhost:2000"
+		/*nodeID := os.Getenv("NODE_ID")
 
 		if nodeID == "" {
 			startNodeCmd.Usage()
 			os.Exit(1)
-		}
+		}*/
 
 		cli.startNode(nodeID, *startNodeMiner,*startNodeIpcPath,*startNodeHost,*startNodePort)
 	}

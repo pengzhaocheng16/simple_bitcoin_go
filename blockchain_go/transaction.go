@@ -35,7 +35,7 @@ type Transaction struct {
 	Vout []TXOutput
 	Timestamp *big.Int
 	size atomic.Value
-	data txdata
+	Data txdata
 	from atomic.Value
 }
 type writeCounter common.StorageSize
@@ -58,15 +58,16 @@ type txdata struct {
 }
 
 func (tx Transaction)Nonce()uint64{
-	return tx.data.AccountNonce
+	return tx.Data.AccountNonce
 }
 
 func (tx Transaction)To()*common.Address{
-	return tx.data.Recipient
+	return tx.Data.Recipient
 }
 
 func (tx Transaction)Value()*big.Int{
-	return tx.data.Amount
+	return big.NewInt(int64(tx.Vout[0].Value))
+	//return tx.Data.Amount
 }
 
 func (tx Transaction)Cost()*big.Int{
@@ -222,7 +223,7 @@ func (tx *Transaction) TrimmedCopy() Transaction {
 	var froma = atomic.Value{}
 	froma.Store(common.Address{})
 	txCopy := Transaction{tx.ID, inputs, outputs,
-	tx.Timestamp,tx.size,tx.data,froma}
+	tx.Timestamp,tx.size,tx.Data,froma}
 	tx.SetSize(uint64(len(tx.Serialize())))
 	//txCopy.size.Store(tx.Size())
 
@@ -565,7 +566,7 @@ func TxDifference(a, b Transactions) (keep Transactions) {
 type TxByNonce Transactions
 
 func (s TxByNonce) Len() int           { return len(s) }
-func (s TxByNonce) Less(i, j int) bool { return s[i].data.AccountNonce < s[j].data.AccountNonce }
+func (s TxByNonce) Less(i, j int) bool { return s[i].Data.AccountNonce < s[j].Data.AccountNonce }
 func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 /**
