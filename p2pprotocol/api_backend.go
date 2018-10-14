@@ -9,12 +9,10 @@ import (
 	"fmt"
 	"math/big"
 	"github.com/ethereum/go-ethereum/common"
-
-
-
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/event"
 	"encoding/hex"
+	"github.com/gpmgo/gopm/modules/log"
 )
 
 //import "github.com/ethereum/go-ethereum/eth/gasprice"
@@ -25,13 +23,14 @@ type SwcAPIBackend struct {
 	//gpo *gasprice.Oracle
 }
 
-
 func (b *SwcAPIBackend) ChainConfig() *params.ChainConfig {
 	return b.swc.chainConfig
 }
 
 func (b *SwcAPIBackend) CurrentBlock() *core.Block {
-	return b.swc.blockchain.CurrentBlock()
+	bc := core.NewBlockchain(b.swc.nodeID)
+	defer bc.Db.Close()
+	return bc.CurrentBlock()
 }
 /*
 func (b *SwcAPIBackend) SetHead(number uint64) {
@@ -177,16 +176,21 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 	}
 */
 	func (b *SwcAPIBackend) SendTx(ctx context.Context, signedTx *core.Transaction) error {
-		/*for _, p := range Manager.Peers.Peers {
-			SendTx(p, p.Rw, signedTx)
-		}*/
+		log.Info("===Manager.Peers.Peers len %d ","info",len(Manager.Peers.Peers))
+		signedTx.AsMessage(b.swc.txPool.Signer)
 		// pool lock mangement
 		Manager.Mu.Lock()
 		defer Manager.Mu.Unlock()
+		for _, p := range Manager.Peers.Peers {
+			SendTx(p, p.Rw, signedTx)
+		}
 
 		Manager.TxMempool[hex.EncodeToString(signedTx.ID)] = signedTx
-		 return b.swc.txPool.AddLocal(signedTx)
-		//return nil
+
+		err := b.swc.txPool.AddLocal(signedTx)
+		fmt.Printf("===AddLocal %s \n", "error",err)
+
+		return nil
 	}
 
 	func (b *SwcAPIBackend) GetPoolTransactions() (core.Transactions, error) {

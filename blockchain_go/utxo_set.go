@@ -318,6 +318,10 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 			}
 			//txPQueue.Close()
 			fmt.Println("--bf IsUTXOAmountValid  \n")
+			result = VerifyTx(*tx,u.Blockchain)
+			if(!result){
+				return result,9
+			}
 			result = u.IsUTXOAmountValid(tx,txPQueue)
 			//result = u.IsUTXOAmountValid(tx,nil)
 			fmt.Printf("--af IsUTXOAmountValid  result %s \n",result)
@@ -337,7 +341,7 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 						txPQueue.DeleteMsg(4,in.Txid)
 					}
 				}
-				return result,9
+				return result,10
 			}else{
 				fmt.Println("--bf result check true \n")
 				//txid has used put it in database
@@ -355,15 +359,15 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 	//fmt.Printf("coinbaseReward %s \n", coinbaseReward)
 	//in that block reward timeperiod less than that currenteward
 	if(math.Pow(0.5, math.Floor(float64(block.Height.Int64()/halfRewardblockCount)))*subsidy != float64(coinbaseReward)){
-		return false,10
+		return false,11
 	}
 	if(block.Timestamp.Cmp(lastBlockTime) <=0 ){
 		fmt.Println("Timestamp.Cmp(lastBlockTime)  \n")
-		return false,11
+		return false,12
 	}
 	//fmt.Printf("coinbaseNumber %s \n", coinbaseNumber)
 	if(coinbaseNumber>1){
-		return false,12
+		return false,13
 	}
 
 	return true,0

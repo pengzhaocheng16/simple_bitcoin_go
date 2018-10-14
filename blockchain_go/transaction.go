@@ -179,6 +179,32 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 		tx.Vin[inID].Signature = signature
 		txCopy.Vin[inID].PubKey = nil
 	}
+
+}
+
+
+// AsMessage returns the transaction as a core.Message.
+//
+// AsMessage requires a signer to derive the sender.
+//
+// XXX Rename message to something less arbitrary?
+func (tx *Transaction) AsMessage(s Signer) (*Transaction, error) {
+
+	var err error
+	_, err = Sender(s, tx)
+	return tx, err
+}
+
+// WithSignature returns a new transaction with the given signature.
+// This signature needs to be formatted as described in the yellow paper (v+27).
+func (tx *Transaction) WithSignature(signer Signer, sig []byte) (*Transaction, error) {
+	r, s, v, err := signer.SignatureValues(tx, sig)
+	if err != nil {
+		return nil, err
+	}
+	cpy := &Transaction{ID:tx.ID,Vin:tx.Vin,Vout:tx.Vout,Timestamp:tx.Timestamp,Data: tx.Data}
+	cpy.Data.R, cpy.Data.S, cpy.Data.V = r, s, v
+	return cpy, nil
 }
 
 // String returns a human-readable representation of a transaction
@@ -509,6 +535,7 @@ func VerifyTx(tx Transaction,bc *Blockchain)bool{
 	var valid2 = true
 	var valid3 = true
 	//verify signatures
+	//TODO check transaction data signature
 	if !bc.VerifyTransaction(&tx) {
 		//log.Panic("ERROR: Invalid transaction:sign")
 		valid1 = false
@@ -625,6 +652,8 @@ func NewTransaction(wallet Wallet,nonce uint64,to *common.Address,amount *big.In
 	var v = atomic.Value{}
 	v.Store(common.StorageSize(0))
 	var froma = atomic.Value{}
+	//froma.Store(PubkeyHashToCommonAddress(pubKeyHash))
+	//froma.Store(nil)
 	froma.Store(common.Address{})
 	tx := Transaction{nil, inputs, outputs,
 	big.NewInt(time.Now().Unix()),v,d,froma}

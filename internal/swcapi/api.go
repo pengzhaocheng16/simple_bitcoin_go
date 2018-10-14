@@ -52,6 +52,7 @@ import (
 	"bytes"
 	"github.com/ethereum/go-ethereum/rlp"
 
+	"github.com/ethereum/go-ethereum/log"
 )
 
 const (
@@ -368,22 +369,23 @@ func (s *PrivateAccountAPI) signTransaction(ctx context.Context, args SendTxArgs
 	if err := args.setDefaults(ctx, s.b); err != nil {
 		return nil, err
 	}
-	//fmt.Printf("===bf toTransaction  \n")
+	fmt.Printf("===bf toTransaction  \n")
 	// Assemble the transaction and sign with the wallet
 	tx := args.toTransaction(wallet,s.b)
 
-	//fmt.Printf("===af toTransaction tx  \n")
+	fmt.Printf("===af toTransaction tx  \n")
 	//In order to prevent double spend（check fail) need to store prev uncomfirmed transaction input tx
 	core.PendingIn(s.b.GetNodeId(),tx)
 	//fmt.Printf("===af PendingIn tx  \n")
 
-	/*var chainID *big.Int
+	var chainID *big.Int = nil
 	if config := s.b.ChainConfig(); config.IsEIP155(s.b.CurrentBlock().Height) {
+	//if config := s.b.ChainConfig();config.ChainID!=nil && config.ChainID.Cmp(big.NewInt(0))>0{
 		chainID = config.ChainID
-	}*/
+	}
 	nodeID := s.b.GetNodeId()
 	//return wallet.SignTxWithPassphrase(account, passwd, tx, chainID)
-	return wallet.SignTxWithPassphrase(account, passwd, tx, nil,nodeID,nil)
+	return wallet.SignTxWithPassphrase(account, passwd, tx, chainID,nodeID,nil)
 }
 
 // SendTransaction will create a transaction from the given arguments and
@@ -400,7 +402,7 @@ func (s *PrivateAccountAPI) SendTransaction(ctx context.Context, args SendTxArgs
 		defer s.nonceLock.UnlockAddr(args.From)
 	}
 	signed, err := s.signTransaction(ctx, args, passwd)
-	fmt.Println("===  after signTransaction: \n")
+	fmt.Printf("===  after signTransaction: %s \n",err)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -1227,23 +1229,26 @@ func (args *SendTxArgs) toTransaction(wallet core.Wallet,b Backend) *core.Transa
 
 // submitTransaction is a helper function that submits tx to txPool and logs a message.
 func submitTransaction(ctx context.Context, b Backend, tx *core.Transaction) (common.Hash, error) {
-	if err := b.SendTx(ctx, tx); err != nil {
+	fmt.Printf("===  before submitTransaction:%x \n",tx.CommonHash())
+	var err error
+	if err = b.SendTx(ctx, tx); err != nil {
+		fmt.Printf("===  after submitTransaction:%s \n",err)
 		return common.Hash{}, err
 	}
-	fmt.Println("===  after submitTransaction: \n")
+	fmt.Printf("===  after submitTransaction 1:%s \n",tx.CommonHash().String())
 	/*if tx.To() == nil {
-		signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Height)
-		from, err := types.Sender(signer, tx)
+		signer := core.MakeSigner(b.ChainConfig(), b.CurrentBlock().Height)
+		from, err := core.Sender(signer, tx)
 		if err != nil {
 			return common.Hash{}, err
 		}
 		addr := crypto.CreateAddress(from, tx.Nonce())
-		log.Info("Submitted contract creation", "fullhash", tx.Hash().Hex(), "contract", addr.Hex())
-	} else {
-		log.Info("Submitted transaction", "fullhash", tx.Hash().Hex(), "recipient", tx.To())
-	}
-	return tx.Hash(), nil
-	*/
+		log.Info("Submitted contract creation", "fullhash", tx.HashCommon().Hex(), "contract", addr.Hex())
+	} else {*/
+		log.Info("Submitted transaction", "fullhash", tx.HashCommon().Hex(), "recipient", tx.To())
+	/*}*/
+	//return tx.Hash(), nil
+
 	return tx.HashCommon(), nil
 }
 /*

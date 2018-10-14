@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"math/big"
 	"encoding/hex"
+	"fmt"
 )
 
 const version = byte(0x00)
@@ -120,6 +121,10 @@ func Base58ToCommonAddress(key []byte)common.Address{
 	return common.BytesToAddress(address)
 }
 
+func PubkeyHashToCommonAddress(key []byte)common.Address{
+	return common.BytesToAddress(key)
+}
+
 func CommonAddressToBase58(address *common.Address)string{
 	return string(GetAddressFromPubkeyHash(address.Bytes()))
 }
@@ -146,6 +151,13 @@ func (w Wallet) SignTxWithPassphrase(account accounts.Account,passwd string,tx *
 	}*/
 
 	tx.Sign(w.PrivateKey, prevTXs)
-	return tx,nil
+	var err error
+	// Depending on the presence of the chain ID, sign with EIP155 or homestead
+	if chainID != nil {
+		tx,err = SignTx(tx, NewEIP155Signer(chainID), &w.PrivateKey)
+	}
+	tx,err = SignTx(tx, HomesteadSigner{}, &w.PrivateKey)
+	fmt.Printf("===af SignTxWithPassphrase tx %x %s \n",tx.ID,err)
+	return tx,err
 	//uTXOSet.Blockchain.SignTransaction(&tx, w.PrivateKey)
 }

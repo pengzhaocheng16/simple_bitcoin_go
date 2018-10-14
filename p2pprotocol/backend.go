@@ -56,8 +56,10 @@ func New(ctx *node.ServiceContext,config *node.Config,bc *core.Blockchain) (*Swa
 
 	var TxPoolConfig = core.DefaultTxPoolConfig
 	chainConfig:= &params.ChainConfig{
-		ChainID:big.NewInt(1),
+		ChainID:nil,
+		EIP155Block:big.NewInt(21000),
 	}//gen.Config
+	swc.chainConfig = chainConfig
 	//bc := core.NewBlockchain(config.NodeID)
 	//defer bc.Db.Close()
 
