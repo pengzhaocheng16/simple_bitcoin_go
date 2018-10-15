@@ -71,6 +71,9 @@ func NewBlock(transactions []*Transaction, prevBlockHash []byte, height *big.Int
 func (b *Block)NumberU64()uint64{
 	return b.Height.Uint64()
 }
+func (b *Block)Root()common.Hash{
+	return b.Hash
+}
 
 // NewGenesisBlock creates and returns genesis Block
 func NewGenesisBlock(coinbase *Transaction) *Block {

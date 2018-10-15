@@ -88,8 +88,25 @@ func DbExists(dbFile string) bool {
 	return true
 }
 
-func (uts *WalletTransactions) InitDB(chainId,address string) error {
-	dbFile := GenWalletStateDbName(chainId)
+// Create a new state from a given trie.
+func New(root common.Hash, db *bolt.DB) (*WalletTransactions, error) {
+	/*tr, err := db.OpenTrie(root)
+	if err != nil {
+		return nil, err
+	}*/
+	return &WalletTransactions{
+		DB:                db,
+		//trie:              tr,
+		stateObjects:      make(map[common.Address]*stateObject),
+		stateObjectsDirty: make(map[common.Address]struct{}),
+		logs:              make(map[common.Hash][]*types.Log),
+		preimages:         make(map[common.Hash][]byte),
+		journal:           newJournal(),
+	}, nil
+}
+
+func (uts *WalletTransactions) InitDB(nodeId,address string) error {
+	dbFile := GenWalletStateDbName(nodeId)
 	fmt.Printf("wallet transaction file %s\n",dbFile)
 	if DbExists(dbFile) {
 		fmt.Println("wallet transaction file already exists.")
@@ -103,6 +120,7 @@ func (uts *WalletTransactions) InitDB(chainId,address string) error {
 	}
 	uts.DB = db;
 
+	if address != "" {
 	err = uts.DB.Update(func(tx *bolt.Tx) error {
 		_, err := tx.CreateBucket([]byte(address+"_"+walletTransactionsBucket))
 
@@ -113,6 +131,7 @@ func (uts *WalletTransactions) InitDB(chainId,address string) error {
 	})
 	if err != nil {
 		return err
+	}
 	}
 
 

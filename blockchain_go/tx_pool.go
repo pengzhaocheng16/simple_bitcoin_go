@@ -155,8 +155,9 @@ type TxPool struct {
 	chainHeadSub event.Subscription
 	Signer       Signer
 
-	//pendingState  *state.ManagedState // Pending state tracking virtual nonces
-	pendingState map[common.Address]uint64
+	currentState *WalletTransactions
+	pendingState  *ManagedState // Pending state tracking virtual nonces
+	//pendingState map[common.Address]uint64
 	currentMaxGas uint64              // Current gas limit for transaction caps
 
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
@@ -186,7 +187,7 @@ func NewTxPool(config TxPoolConfig,chainconfig *params.ChainConfig,bc *Blockchai
 		Signer:      signer,//NewEIP155Signer(chainconfig.ChainID),
 		pending:     make(map[common.Address]*txList),
 		queue:       make(map[common.Address]*txList),
-		//beats:       make(map[common.Address]time.Time),
+		beats:       make(map[common.Address]time.Time),
 		all:         newTxLookup(),
 		chainHeadCh: make(chan ChainHeadEvent, chainHeadChanSize),
 	}
@@ -436,8 +437,8 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx *Transac
 	}
 	// Set the potentially new pending nonce and notify any subsystems of the new tx
 	pool.beats[addr] = time.Now()
-	//pool.pendingState.SetNonce(addr, tx.Nonce()+1)
-	pool.pendingState[addr] = tx.Nonce()+1
+	pool.pendingState.SetNonce(addr, tx.Nonce()+1)
+	//pool.pendingState[addr] = tx.Nonce()+1
 
 	return true
 }
@@ -512,15 +513,15 @@ func (pool *TxPool) reset(oldHead, newHead *Block) {
 	if newHead == nil {
 		//newHead = pool.Bc.CurrentBlock().Header() // Special case during testing
 		newHead = pool.Bc.CurrentBlock() // Special case during testing
-	}/*
-	statedb, err := pool.Bc.StateAt(newHead.Root)
+	}
+	statedb, err := pool.Bc.StateAt(newHead.Root())
 	if err != nil {
 		log.Error("Failed to reset txpool state", "err", err)
 		return
 	}
 	pool.currentState = statedb
-	pool.pendingState = state.ManageState(statedb)*/
-	pool.pendingState = make(map[common.Address]uint64)
+	pool.pendingState = ManageState(statedb)
+	//pool.pendingState = make(map[common.Address]uint64)
 	//pool.currentMaxGas = newHead.GasLimit
 	pool.currentMaxGas = 0
 
@@ -538,8 +539,8 @@ func (pool *TxPool) reset(oldHead, newHead *Block) {
 	// Update all accounts to the latest known pending nonce
 	for addr, list := range pool.pending {
 		txs := list.Flatten() // Heavy but will be cached and is needed by the miner anyway
-		//pool.pendingState.SetNonce(addr, txs[len(txs)-1].Nonce()+1)
-		pool.pendingState[addr] = txs[len(txs)-1].Nonce()+1
+		pool.pendingState.SetNonce(addr, txs[len(txs)-1].Nonce()+1)
+		//pool.pendingState[addr] = txs[len(txs)-1].Nonce()+1
 	}
 	// Check the queue and move transactions over to the pending if possible
 	// or remove those that have become invalid
@@ -568,7 +569,8 @@ func (pool *TxPool) SubscribeNewTxsEvent(ch chan<- NewTxsEvent) event.Subscripti
 }
 
 // State returns the virtual managed(pending) state of the transaction pool.
-func (pool *TxPool) State() map[common.Address]uint64 {
+func (pool *TxPool) State() *ManagedState {
+//func (pool *TxPool) State() map[common.Address]uint64 {
 	pool.mu.RLock()
 	defer pool.mu.RUnlock()
 
@@ -790,12 +792,12 @@ func (pool *TxPool) removeTx(hash common.Hash, outofbound bool) {
 				pool.enqueueTx(tx.CommonHash(), tx)
 			}
 			// Update the account nonce if needed
-			/*if nonce := tx.Nonce(); pool.pendingState.GetNonce(addr) > nonce {
+			if nonce := tx.Nonce(); pool.pendingState.GetNonce(addr) > nonce {
 				pool.pendingState.SetNonce(addr, nonce)
-			}*/
-			if nonce := tx.Nonce(); pool.pendingState[addr] > nonce {
-				pool.pendingState[addr] = nonce
 			}
+			/*if nonce := tx.Nonce(); pool.pendingState[addr] > nonce {
+				pool.pendingState[addr] = nonce
+			}*/
 			return
 		}
 	}
@@ -986,9 +988,9 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 			queuedNofundsCounter.Inc(1)
 		}
 		// Gather all executable transactions and promote them
-		fmt.Println(" == list.Ready ", "pool.pendingState[addr]-", pool.pendingState[addr])
-		//for _, tx := range list.Ready(pool.pendingState.GetNonce(addr)) {
-		for _, tx := range list.Ready(pool.pendingState[addr]) {
+		fmt.Println(" == list.Ready ", "pool.pendingState[addr]-", pool.pendingState.GetNonce(addr))
+		for _, tx := range list.Ready(pool.pendingState.GetNonce(addr)) {
+		//for _, tx := range list.Ready(pool.pendingState[addr]) {
 			hash := tx.CommonHash()
 			if pool.promoteTx(addr, hash, tx) {
 				fmt.Println("Promoting queued transaction", "hash", hash)
@@ -1054,9 +1056,10 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 							//pool.priced.Removed()
 
 							// Update the account nonce to the dropped transaction
-							if nonce := tx.Nonce(); pool.pendingState[offenders[i]] > nonce {
-								//pool.pendingState.SetNonce(offenders[i], nonce)
-								pool.pendingState[offenders[i]] = nonce
+							if nonce := tx.Nonce(); pool.pendingState.GetNonce(offenders[i]) > nonce  {
+							//if nonce := tx.Nonce(); pool.pendingState[offenders[i]] > nonce {
+								pool.pendingState.SetNonce(offenders[i], nonce)
+								//pool.pendingState[offenders[i]] = nonce
 							}
 							log.Trace("Removed fairness-exceeding pending transaction", "hash", hash)
 						}
@@ -1077,9 +1080,12 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 						//pool.priced.Removed()
 
 						// Update the account nonce to the dropped transaction
-						if nonce := tx.Nonce(); pool.pendingState[addr] > nonce {
-							pool.pendingState[addr] = nonce
+						if nonce := tx.Nonce(); pool.pendingState.GetNonce(addr) > nonce {
+							pool.pendingState.SetNonce(addr,nonce)
 						}
+						/*if nonce := tx.Nonce(); pool.pendingState[addr] > nonce {
+							pool.pendingState[addr] = nonce
+						}*/
 						log.Trace("Removed fairness-exceeding pending transaction", "hash", hash)
 					}
 					pending--

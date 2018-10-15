@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"*/
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/core/types"
+	"./state"
 )
 
 const dbFile = "blockchain_%s.db"
@@ -41,6 +42,8 @@ type Blockchain struct {
 	GenesisHash common.Hash
 	tip common.Hash
 	Db  *bolt.DB
+	//stateCache   state.Database // State database to reuse between imports (contains state cache)
+	stateCache  *bolt.DB
 
 	chainHeadFeed event.Feed
 	scope         event.SubscriptionScope
@@ -971,4 +974,21 @@ func (bc *Blockchain) Events(blocks []*Block)[]interface{} {
 // SubscribeChainHeadEvent registers a subscription of ChainHeadEvent.
 func (bc *Blockchain) SubscribeChainHeadEvent(ch chan<- ChainHeadEvent) event.Subscription {
 	return bc.scope.Track(bc.chainHeadFeed.Subscribe(ch))
+}
+
+
+// State returns a new mutable state based on the current HEAD block.
+func (bc *Blockchain) State() (*state.WalletTransactions, error) {
+	return bc.StateAt(bc.CurrentBlock().Root())
+}
+
+// StateAt returns a new mutable state based on a particular point in time.
+func (bc *Blockchain) StateAt(root common.Hash) (*state.WalletTransactions, error) {
+	statedb,err := state.New(root, bc.stateCache)
+	if(err!=nil){
+		log.Println(err)
+	}
+	statedb.InitDB(bc.NodeId,"")
+	bc.stateCache = statedb.DB
+	return statedb,err
 }
