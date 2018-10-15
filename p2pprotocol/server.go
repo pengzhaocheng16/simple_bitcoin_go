@@ -588,7 +588,7 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 
 	p.MarkTransaction(tx.ID)
 
-	//Manager.TxMempool[hex.EncodeToString(tx.ID)] = &tx
+	Manager.TxMempool[hex.EncodeToString(tx.ID)] = &tx
 	txs := []*core.Transaction{&tx}
 	Manager.txPool.AddRemotes(txs)
 

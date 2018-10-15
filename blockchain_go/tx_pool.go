@@ -961,6 +961,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 	// Iterate over all accounts and promote any executable transactions
 	for _, addr := range accounts {
 		list := pool.queue[addr]
+		fmt.Println("pool.queue[addr] list", "list", list)
 		if list == nil {
 			continue // Just in case someone calls with a non existing account
 		}
@@ -984,11 +985,12 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 			queuedNofundsCounter.Inc(1)
 		}
 		// Gather all executable transactions and promote them
+		fmt.Println(" == list.Ready ", "pool.pendingState[addr]-", pool.pendingState[addr])
 		//for _, tx := range list.Ready(pool.pendingState.GetNonce(addr)) {
 		for _, tx := range list.Ready(pool.pendingState[addr]) {
-			fmt.Printf(" == list.Ready \n", "promoted-", tx.ID)
 			hash := tx.CommonHash()
 			if pool.promoteTx(addr, hash, tx) {
+				fmt.Println("Promoting queued transaction", "hash", hash)
 				log.Trace("Promoting queued transaction", "hash", hash)
 				promoted = append(promoted, tx)
 			}

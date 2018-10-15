@@ -243,11 +243,16 @@ func (pm *ProtocolManager) syncTransactions(p *Peer) {
 	var txs core.Transactions
 
 	pending, _ := pm.txPool.Pending()
-	//pending := pm.TxMempool
 	//fmt.Println("---len(pending) ",len(pending))
 	for _, batch := range pending {
 		//fmt.Println("---syncTransactions ")
 		txs = append(txs, batch...)
+		//txs = append(txs, batch)
+	}
+	pending1 := pm.TxMempool
+	for _, batch := range pending1 {
+		//fmt.Println("---syncTransactions ")
+		txs = append(txs, batch)
 		//txs = append(txs, batch)
 	}
 	if len(txs) == 0 {
