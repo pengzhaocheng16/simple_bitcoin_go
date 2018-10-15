@@ -161,7 +161,7 @@ func (c *stateObject) getTrie(db *bolt.DB,tx *bolt.Tx) (*bolt.Bucket) {
 	}
 	return c.trie
 }
-/*
+
 // GetState returns a value in account storage.
 func (self *stateObject) GetState(db *bolt.DB, key common.Hash) common.Hash {
 	value, exists := self.cachedStorage[key]
@@ -169,7 +169,8 @@ func (self *stateObject) GetState(db *bolt.DB, key common.Hash) common.Hash {
 		return value
 	}
 	// Load from DB in case it is missing.
-	enc, err := self.getTrie(db).TryGet(key[:])
+	//enc, err := self.getTrie(db).TryGet(key[:])
+	enc, err := self.db.TryGet(key[:])
 	if err != nil {
 		self.setError(err)
 		return common.Hash{}
@@ -183,8 +184,8 @@ func (self *stateObject) GetState(db *bolt.DB, key common.Hash) common.Hash {
 	}
 	self.cachedStorage[key] = value
 	return value
-}*/
-/*
+}
+
 // SetState updates a value in account storage.
 func (self *stateObject) SetState(db *bolt.DB, key, value common.Hash) {
 	self.db.journal.append(storageChange{
@@ -193,7 +194,7 @@ func (self *stateObject) SetState(db *bolt.DB, key, value common.Hash) {
 		prevalue: self.GetState(db, key),
 	})
 	self.setState(key, value)
-}*/
+}
 
 func (self *stateObject) setState(key, value common.Hash) {
 	self.cachedStorage[key] = value

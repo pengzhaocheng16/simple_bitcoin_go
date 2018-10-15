@@ -9,7 +9,6 @@ import (
 	"time"
 	"encoding/hex"
 	"math/big"
-	"github.com/ethereum/go-ethereum/common"
 )
 
 func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
@@ -134,7 +133,18 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 			bc = core.NewBlockchain(nodeID)
 			UTXOSet := core.UTXOSet{bc}
 			log.Println("--send to",toaddress)
-			tx := core.NewUTXOTransaction(&wallet, toaddress, big.NewInt(int64(amountnum)), []byte{},&UTXOSet,nodeID)
+
+			block := bc.CurrentBlock()
+			statedb, err := bc.StateAt(block.Root())
+			if(err !=nil){
+				log.Panic(err)
+			}
+			var pendingState = state.ManageState(statedb)
+			var addr = wallet.ToCommonAddress()
+			var nonce = pendingState.GetNonce(addr)
+			statedb.SetNonce(addr,nonce+1)
+			statedb.Finalise(true)
+			tx := core.NewUTXOTransaction(nonce+1,&wallet, toaddress, big.NewInt(int64(amountnum)), []byte{},&UTXOSet,nodeID)
 			for _, p := range p2pprotocol.Manager.Peers.Peers {
 				p2pprotocol.SendTx(p, p.Rw, tx)
 			}

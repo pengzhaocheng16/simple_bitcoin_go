@@ -201,6 +201,7 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 			log.Error("error",core.ErrInvalidSender)
 		}
 		pendingState.SetNonce(from,signedTx.Nonce())
+		statedb.Finalise(true)
 		err = b.swc.txPool.AddLocal(signedTx)
 		fmt.Printf("===AddLocal %s \n", "error",err)
 

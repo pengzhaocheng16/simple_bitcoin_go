@@ -75,6 +75,7 @@ func CreateBlockchain(address, nodeID string) *Blockchain {
 	statedb.AddBalance(addr, big.NewInt(subsidy))
 	/*statedb.SetCode(addr, account.Code)*/
 	statedb.SetNonce(addr, 0)
+	statedb.Finalise(true)
 	/*for key, value := range account.Storage {
 		statedb.SetState(addr, key, value)
 	}*/

@@ -388,13 +388,6 @@ func (self *WalletTransactions) GetNonce(addr common.Address) uint64 {
 	return 0
 }
 
-// AddBalance adds amount to the account associated with addr.
-func (self *WalletTransactions) AddBalance(addr common.Address, amount *big.Int) {
-	stateObject := self.GetOrNewStateObject(addr)
-	if stateObject != nil {
-		stateObject.AddBalance(amount)
-	}
-}
 
 // Retrieve the balance from the given address or 0 if object not found
 func (self *WalletTransactions) GetBalance(addr common.Address) *big.Int {
@@ -486,7 +479,7 @@ func (self *WalletTransactions) SetCode(addr common.Address, code []byte) {
 func (self *WalletTransactions) SetState(addr common.Address, key, value common.Hash) {
 	stateObject := self.GetOrNewStateObject(addr)
 	if stateObject != nil {
-		stateObject.SetState(self.db, key, value)
+		stateObject.SetState(self.DB, key, value)
 	}
 }
 
