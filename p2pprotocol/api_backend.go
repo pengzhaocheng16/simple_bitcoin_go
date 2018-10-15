@@ -10,9 +10,9 @@ import (
 	"math/big"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/event"
 	"encoding/hex"
-	"github.com/gpmgo/gopm/modules/log"
 )
 
 //import "github.com/ethereum/go-ethereum/eth/gasprice"
