@@ -631,14 +631,14 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 			}
 			defer pqueue.Close()
 			var sizeTotal float64 = 0
-			for id := range Manager.TxMempool {
+			for id,txMine := range Manager.TxMempool {
 				//in case of double spend
-				for _, vin := range tx.Vin {
-					pqueue.SetMsg(1, vin.Txid, tx.ID)
+				for _, vin := range txMine.Vin {
+					pqueue.SetMsg(1, vin.Txid, txMine.ID)
 				}
 				//verify transaction
 				//block txs size limit to 4M
-				if(core.VerifyTx(tx,bc) && sizeTotal < 4 * 1024 *1024) {
+				if(core.VerifyTx(*txMine,bc) && sizeTotal < 4 * 1024 *1024) {
 					sizeTotal = sizeTotal + float64(Manager.TxMempool[id].Size())
 					txs = append(txs, Manager.TxMempool[id])
 				}
@@ -655,12 +655,21 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 				return errResp(2, "transactions empty" )
 			}
 
+			block := bc.CurrentBlock()
+			statedb, err := bc.StateAt(block.Root())
+			if(err !=nil){
+				log.Panic(err)
+			}
+			var pendingState = state.ManageState(statedb)
 			fmt.Println("==>NewCoinbaseTX ")
-			cbTx := core.NewCoinbaseTX(miningAddress, "",bc.NodeId)
+			var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(miningAddress)))
+			cbTx := core.NewCoinbaseTX(nonce+1,miningAddress, "",bc.NodeId)
 			txs = append(txs, cbTx)
 
 
 			newBlock := bc.MineBlock(txs)
+
+
 			if(newBlock != nil){
 				UTXOSet := core.UTXOSet{bc}
 				//UTXOSet.Reindex()
@@ -681,6 +690,18 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 			for _, tx := range txs {
 				txID := hex.EncodeToString(tx.ID)
 				delete(Manager.TxMempool, txID)
+				//commit transaction nonce
+				statedb, err := bc.StateAt(newBlock.Root())
+				if(err !=nil){
+					log.Panic(err)
+				}
+				var pendingState = state.ManageState(statedb)
+				from, err := core.Sender(Manager.txPool.Signer, tx)
+				if err != nil {
+					log.Panic( core.ErrInvalidSender)
+				}
+				pendingState.SetNonce(from,tx.Data.AccountNonce)
+				statedb.Finalise(true)
 			}
 
 			fmt.Println("==>after mine len(Manager.TxMempool) ",len(Manager.TxMempool))

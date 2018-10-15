@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/event"
 	"encoding/hex"
+	"../blockchain_go/state"
 )
 
 //import "github.com/ethereum/go-ethereum/eth/gasprice"
@@ -177,17 +178,30 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 */
 	func (b *SwcAPIBackend) SendTx(ctx context.Context, signedTx *core.Transaction) error {
 		log.Info("===Manager.Peers.Peers len %d ","info",len(Manager.Peers.Peers))
-		signedTx.AsMessage(b.swc.txPool.Signer)
-		// pool lock mangement
-		Manager.Mu.Lock()
-		defer Manager.Mu.Unlock()
+		signedTx.InitFrom(b.swc.txPool.Signer)
+		// TODO pool lock mangement
+		/*Manager.Mu.Lock()
+		defer Manager.Mu.Unlock()*/
 		for _, p := range Manager.Peers.Peers {
 			SendTx(p, p.Rw, signedTx)
 		}
 
 		Manager.TxMempool[hex.EncodeToString(signedTx.ID)] = signedTx
 
-		err := b.swc.txPool.AddLocal(signedTx)
+		//set nonce to statedb
+		block := b.CurrentBlock()
+		statedb, err := state.New(block.Root(),nil,b.swc.nodeID)
+		if(err !=nil){
+			log.Error("error",err)
+		}
+		var pendingState = state.ManageState(statedb)
+		// Make sure the transaction is signed properly
+		from, err := core.Sender(Manager.txPool.Signer, signedTx)
+		if err != nil {
+			log.Error("error",core.ErrInvalidSender)
+		}
+		pendingState.SetNonce(from,signedTx.Nonce())
+		err = b.swc.txPool.AddLocal(signedTx)
 		fmt.Printf("===AddLocal %s \n", "error",err)
 
 		return nil
@@ -210,8 +224,8 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 	}
 
 	func (b *SwcAPIBackend) GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error) {
-		//return b.swc.txPool.State().GetNonce(addr), nil
-		return core.GetPoolNonce(b.swc.nodeID,addr.String())
+		return b.swc.txPool.State().GetNonce(addr), nil
+		//return core.GetPoolNonce(b.swc.nodeID,addr.String())
 	}
 
 	func (b *SwcAPIBackend) GetNodeId() string{

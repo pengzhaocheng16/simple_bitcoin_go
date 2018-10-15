@@ -184,12 +184,9 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 }
 
 
-// AsMessage returns the transaction as a core.Message.
+// InitFrom requires a signer to derive the sender.
 //
-// AsMessage requires a signer to derive the sender.
-//
-// XXX Rename message to something less arbitrary?
-func (tx *Transaction) AsMessage(s Signer) (*Transaction, error) {
+func (tx *Transaction) InitFrom(s Signer) (*Transaction, error) {
 
 	var err error
 	_, err = Sender(s, tx)
@@ -302,7 +299,7 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
 }
 
 // NewCoinbaseTX creates a new coinbase transaction
-func NewCoinbaseTX(to, data,nodeID string) *Transaction {
+func NewCoinbaseTX(nonce uint64,to, data,nodeID string) *Transaction {
 	if data == "" {
 		randData := make([]byte, subsidy)
 		_, err := rand.Read(randData)
@@ -322,11 +319,12 @@ func NewCoinbaseTX(to, data,nodeID string) *Transaction {
 	address := toa.String()
 	var wt = new(WalletTransactions)
 	wt.InitDB(nodeID,address)
-	nonce,err := wt.GetTransactionNonce(address)
+	//nonce,err := wt.GetTransactionNonce(address)
+	//nonce := Manager.txPool.State().GetNonce(addr)
 	wt.DB.Close()
-	if(err!=nil){
+	/*if(err!=nil){
 		log.Panic(err)
-	}
+	}*/
 	d := txdata{
 		AccountNonce: nonce,
 		Recipient:    &toa,
@@ -355,7 +353,7 @@ func NewCoinbaseTX(to, data,nodeID string) *Transaction {
 
 // NewUTXOTransaction creates a new transaction
 // sign transaction
-func NewUTXOTransaction(wallet *Wallet, to string, amount *big.Int,data []byte, UTXOSet *UTXOSet,nodeID string) *Transaction {
+func NewUTXOTransaction(nonce uint64,wallet *Wallet, to string, amount *big.Int,data []byte, UTXOSet *UTXOSet,nodeID string) *Transaction {
 	pubKeyHash := HashPubKey(wallet.PublicKey)
 	var inputs []TXInput
 	var outputs []TXOutput
@@ -389,14 +387,14 @@ func NewUTXOTransaction(wallet *Wallet, to string, amount *big.Int,data []byte, 
 	}
 
 	//prepare tx data
-	address := common.BytesToAddress(pubKeyHash).String()
+	/*address := common.BytesToAddress(pubKeyHash).String()
 	var wt = new(WalletTransactions)
 	wt.InitDB(nodeID,address)
 	nonce,err := wt.GetTransactionNonce(address)
 	wt.DB.Close()
 	if(err!=nil){
 		log.Panic(err)
-	}
+	}*/
 	var toa = Base58ToCommonAddress([]byte(to))
 	d := txdata{
 		AccountNonce: nonce,

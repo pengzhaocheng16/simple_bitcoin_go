@@ -9,6 +9,7 @@ import (
 	"time"
 	"encoding/hex"
 	"math/big"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
@@ -36,10 +37,29 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 	}
 	wallet := wallets.GetWallet(from)
 
-	tx := core.NewUTXOTransaction(&wallet, to, big.NewInt(int64(amount)),[]byte{}, &UTXOSet,nodeID)
+	block := bc.CurrentBlock()
+	statedb, err := bc.StateAt(block.Root())
+	if(err !=nil){
+		log.Panic(err)
+	}
+	var pendingState = state.ManageState(statedb)
+	var addr = wallet.ToCommonAddress()
+	var nonce = pendingState.GetNonce(addr)
+	statedb.SetNonce(addr,nonce+1)
+	statedb.Finalise(true)
+	tx := core.NewUTXOTransaction(nonce+1,&wallet, to, big.NewInt(int64(amount)),[]byte{}, &UTXOSet,nodeID)
 
 	if mineNow {
-		cbTx := core.NewCoinbaseTX(from, "",nodeID)
+		block := bc.CurrentBlock()
+		statedb, err := bc.StateAt(block.Root())
+		if(err !=nil){
+			log.Panic(err)
+		}
+		var pendingState = state.ManageState(statedb)
+		fmt.Println("==>NewCoinbaseTX ")
+		var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(from)))
+
+		cbTx := core.NewCoinbaseTX(nonce+1,from, "",nodeID)
 		txs := []*core.Transaction{cbTx, tx}
 
 		newBlock := bc.MineBlock(txs)

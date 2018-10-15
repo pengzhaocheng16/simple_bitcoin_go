@@ -15,6 +15,7 @@ import (
 	"os"
 	"math/big"
 	"strings"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
 const walletTransactionsBucket = "wallettransactions"
@@ -234,7 +235,7 @@ func (uts *WalletTransactions) DeleteTransaction(txID []byte,address string) err
 	})
 }
 
-
+/*
 // returns transaction nonce  if it exists
 func (uts *WalletTransactions) GetTransactionNonce(address string) (uint64, error) {
 	var nonce uint64
@@ -263,7 +264,7 @@ func (uts *WalletTransactions) GetTransactionNonce(address string) (uint64, erro
 		return 0, err
 	}
 	return nonce, nil
-}
+}*/
 
 func (uts *WalletTransactions) TryGet(address []byte) ([]byte, error) {
 	var cb []byte
@@ -271,8 +272,11 @@ func (uts *WalletTransactions) TryGet(address []byte) ([]byte, error) {
 	uts.InitDB(uts.NodeId,"")
 	defer uts.DB.Close()
 	err := uts.DB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(state+"_"+crypto.Keccak256Hash(address[:]).String()))
+		b,err := tx.CreateBucketIfNotExists([]byte(state+"_"+crypto.Keccak256Hash(address[:]).String()))
 
+		if err!=nil{
+			return err
+		}
 		if b == nil {
 			return NewDBIsNotReadyError()
 		}
@@ -286,6 +290,58 @@ func (uts *WalletTransactions) TryGet(address []byte) ([]byte, error) {
 		return nil, err
 	}
 	return cb, nil
+}
+
+
+func (uts *WalletTransactions) TryUpdate(address,data []byte) ( error) {
+	var err error
+
+	uts.InitDB(uts.NodeId,"")
+	defer uts.DB.Close()
+	err = uts.DB.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(state+"_"+crypto.Keccak256Hash(address[:]).String()))
+
+		if b == nil {
+			return NewDBIsNotReadyError()
+		}
+
+		err1 := b.Put(address,data)
+		if(err1 != nil){
+			return err1
+		}
+
+		return nil
+	})
+	if err != nil {
+		return  err
+	}
+	return nil
+}
+
+
+func (uts *WalletTransactions) TryDelete(address []byte) ( error) {
+	var err error
+
+	uts.InitDB(uts.NodeId,"")
+	defer uts.DB.Close()
+	err = uts.DB.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(state+"_"+crypto.Keccak256Hash(address[:]).String()))
+
+		if b == nil {
+			return NewDBIsNotReadyError()
+		}
+
+		err1 := b.Delete(address)
+		if(err1 != nil){
+			return err1
+		}
+
+		return nil
+	})
+	if err != nil {
+		return  err
+	}
+	return nil
 }
 
 
@@ -312,6 +368,148 @@ func (self *WalletTransactions) createObject(addr common.Address) (newobj, prev 
 	}
 	self.setStateObject(newobj)
 	return newobj, prev
+}
+
+
+
+// setError remembers the first non-nil error it is called with.
+func (self *WalletTransactions) setError(err error) {
+	if self.dbErr == nil {
+		self.dbErr = err
+	}
+}
+
+func (self *WalletTransactions) GetNonce(addr common.Address) uint64 {
+	stateObject := self.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.Nonce()
+	}
+
+	return 0
+}
+
+// AddBalance adds amount to the account associated with addr.
+func (self *WalletTransactions) AddBalance(addr common.Address, amount *big.Int) {
+	stateObject := self.GetOrNewStateObject(addr)
+	if stateObject != nil {
+		stateObject.AddBalance(amount)
+	}
+}
+
+// Retrieve the balance from the given address or 0 if object not found
+func (self *WalletTransactions) GetBalance(addr common.Address) *big.Int {
+	stateObject := self.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.Balance()
+	}
+	return common.Big0
+}
+
+
+// Finalise finalises the state by removing the self destructed objects
+// and clears the journal as well as the refunds.
+func (s *WalletTransactions) Finalise(deleteEmptyObjects bool) {
+	for addr := range s.journal.dirties {
+		stateObject, exist := s.stateObjects[addr]
+		if !exist {
+			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
+			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
+			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
+			// it will persist in the journal even though the journal is reverted. In this special circumstance,
+			// it may exist in `s.journal.dirties` but not in `s.stateObjects`.
+			// Thus, we can safely ignore it here
+			continue
+		}
+
+		if stateObject.suicided || (deleteEmptyObjects && stateObject.empty()) {
+			s.deleteStateObject(stateObject)
+		} else {
+			stateObject.updateRoot(s.DB)
+			s.updateStateObject(stateObject)
+		}
+		s.stateObjectsDirty[addr] = struct{}{}
+	}
+	// Invalidate journal because reverting across transactions is not allowed.
+	s.clearJournalAndRefund()
+}
+
+// IntermediateRoot computes the current root hash of the state trie.
+// It is called in between transactions to get the root hash that
+// goes into transaction receipts.
+/*func (s *WalletTransactions) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
+	s.Finalise(deleteEmptyObjects)
+	return s.trie.Hash()
+}*/
+
+
+/*
+ * SETTERS
+ */
+
+// AddBalance adds amount to the account associated with addr.
+func (self *WalletTransactions) AddBalance(addr common.Address, amount *big.Int) {
+	stateObject := self.GetOrNewStateObject(addr)
+	if stateObject != nil {
+		stateObject.AddBalance(amount)
+	}
+}
+
+// SubBalance subtracts amount from the account associated with addr.
+func (self *WalletTransactions) SubBalance(addr common.Address, amount *big.Int) {
+	stateObject := self.GetOrNewStateObject(addr)
+	if stateObject != nil {
+		stateObject.SubBalance(amount)
+	}
+}
+
+func (self *WalletTransactions) SetBalance(addr common.Address, amount *big.Int) {
+	stateObject := self.GetOrNewStateObject(addr)
+	if stateObject != nil {
+		stateObject.SetBalance(amount)
+	}
+}
+
+func (self *WalletTransactions) SetNonce(addr common.Address, nonce uint64) {
+	stateObject := self.GetOrNewStateObject(addr)
+	if stateObject != nil {
+		stateObject.SetNonce(nonce)
+	}
+}
+/*
+func (self *WalletTransactions) SetCode(addr common.Address, code []byte) {
+	stateObject := self.GetOrNewStateObject(addr)
+	if stateObject != nil {
+		stateObject.SetCode(crypto.Keccak256Hash(code), code)
+	}
+}*/
+
+func (self *WalletTransactions) SetState(addr common.Address, key, value common.Hash) {
+	stateObject := self.GetOrNewStateObject(addr)
+	if stateObject != nil {
+		stateObject.SetState(self.db, key, value)
+	}
+}
+
+//
+// Setting, updating & deleting state object methods.
+//
+
+// updateStateObject writes the given object to the trie.
+func (self *WalletTransactions) updateStateObject(stateObject *stateObject) {
+	addr := stateObject.Address()
+	data, err := rlp.EncodeToBytes(stateObject)
+	if err != nil {
+		panic(fmt.Errorf("can't encode object at %x: %v", addr[:], err))
+	}
+	//self.setError(self.trie.TryUpdate(addr[:], data))
+	self.setError(self.TryUpdate(addr[:], data))
+}
+// deleteStateObject removes the given object from the state trie.
+func (self *WalletTransactions) deleteStateObject(stateObject *stateObject) {
+	stateObject.deleted = true
+	addr := stateObject.Address()
+	//self.setError(self.trie.TryDelete(addr[:]))
+	self.setError(self.TryDelete(addr[:]))
 }
 
 // Retrieve a state object given by the address. Returns nil if not found.
@@ -346,35 +544,57 @@ func (self *WalletTransactions) setStateObject(object *stateObject) {
 	self.stateObjects[object.Address()] = object
 }
 
-// setError remembers the first non-nil error it is called with.
-func (self *WalletTransactions) setError(err error) {
-	if self.dbErr == nil {
-		self.dbErr = err
-	}
+func (s *WalletTransactions) clearJournalAndRefund() {
+	s.journal = newJournal()
+	s.validRevisions = s.validRevisions[:0]
+	s.refund = 0
 }
 
-func (self *WalletTransactions) GetNonce(addr common.Address) uint64 {
-	stateObject := self.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.Nonce()
-	}
+// Commit writes the state to the underlying in-memory trie database.
+func (s *WalletTransactions) Commit(deleteEmptyObjects bool) (root common.Hash, err error) {
+	defer s.clearJournalAndRefund()
 
-	return 0
-}
-
-// AddBalance adds amount to the account associated with addr.
-func (self *WalletTransactions) AddBalance(addr common.Address, amount *big.Int) {
-	stateObject := self.GetOrNewStateObject(addr)
-	if stateObject != nil {
-		stateObject.AddBalance(amount)
+	for addr := range s.journal.dirties {
+		s.stateObjectsDirty[addr] = struct{}{}
 	}
-}
-
-// Retrieve the balance from the given address or 0 if object not found
-func (self *WalletTransactions) GetBalance(addr common.Address) *big.Int {
-	stateObject := self.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.Balance()
+	// Commit objects to the trie.
+	for addr, stateObject := range s.stateObjects {
+		_, isDirty := s.stateObjectsDirty[addr]
+		switch {
+		case stateObject.suicided || (isDirty && deleteEmptyObjects && stateObject.empty()):
+			// If the object has been removed, don't bother syncing it
+			// and just mark it for deletion in the trie.
+			s.deleteStateObject(stateObject)
+		case isDirty:
+			/*// Write any contract code associated with the state object
+			if stateObject.code != nil && stateObject.dirtyCode {
+				s.db.TrieDB().Insert(common.BytesToHash(stateObject.CodeHash()), stateObject.code)
+				stateObject.dirtyCode = false
+			}*/
+			// Write any storage changes in the state object to its storage trie.
+			/*if err := stateObject.CommitTrie(s.db); err != nil {
+				return common.Hash{}, err
+			}*/
+			// Update the object in the main account trie.
+			s.updateStateObject(stateObject)
+		}
+		delete(s.stateObjectsDirty, addr)
 	}
-	return common.Big0
+	// Write trie changes.
+	/*root, err = s.trie.Commit(func(leaf []byte, parent common.Hash) error {
+			var account Account
+			if err := rlp.DecodeBytes(leaf, &account); err != nil {
+				return nil
+			}
+			if account.Root != emptyState {
+				s.db.TrieDB().Reference(account.Root, parent)
+			}
+			code := common.BytesToHash(account.CodeHash)
+			if code != emptyCode {
+				s.db.TrieDB().Reference(code, parent)
+			}
+			return nil
+	})*/
+	log.Debug("Trie cache stats after commit", "misses", trie.CacheMisses(), "unloads", trie.CacheUnloads())
+	return root, err
 }

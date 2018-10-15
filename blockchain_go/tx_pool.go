@@ -831,17 +831,17 @@ func (pool *TxPool) addTx(tx *Transaction, local bool) error {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
-	fmt.Printf("===pool addTx  local %s \n","info",local)
+	fmt.Println("===pool addTx  local %s ","info",local)
 	// Try to inject the transaction and update any state
 	replace, err := pool.add(tx, local)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("===pool addTx replace %s \n","info",replace)
+	fmt.Println("===pool addTx replace %s ","info",replace)
 	// If we added a new transaction, run promotion checks and return
 	if !replace {
 		from, _ := Sender(pool.Signer, tx) // already validated
-		fmt.Printf("===pool addTx from %s \n","info",from.String())
+		fmt.Println("===pool addTx from %s ","info",from.String())
 		pool.promoteExecutables([]common.Address{from})
 	}
 	return nil
@@ -888,7 +888,7 @@ func (pool *TxPool) add(tx *Transaction, local bool) (bool, error) {
 	}*/
 	// If the transaction is replacing an already pending one, do directly
 	from, _ := Sender(pool.Signer, tx) // already validated
-	fmt.Println("pool.pending[from]", "len ", pool.pending[from])
+	fmt.Println("pool.pending[from]", from.String(), pool.pending[from])
 	if list := pool.pending[from]; list != nil && list.Overlaps(tx) {
 		// Nonce already pending, check if required price bump is met
 		//inserted, old := list.Add(tx, pool.config.PriceBump)
@@ -979,7 +979,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 	// Iterate over all accounts and promote any executable transactions
 	for _, addr := range accounts {
 		list := pool.queue[addr]
-		fmt.Println("pool.queue[addr] list", "list", list)
+		fmt.Println("pool.queue[addr] list", addr, list)
 		if list == nil {
 			continue // Just in case someone calls with a non existing account
 		}
@@ -988,6 +988,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 			//nonce,_ := GetPoolNonce(pool.Bc.NodeId,addr.String())
 			//for _, tx := range list.Forward(nonce) {
 			hash := tx.CommonHash()
+			fmt.Println("Removed old queued transaction", "hash", hash)
 			log.Trace("Removed old queued transaction", "hash", hash)
 			pool.all.Remove(hash)
 			//pool.priced.Removed()
@@ -997,14 +998,17 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 		//drops, _ := list.Filter(big.NewInt(int64(nonce)), pool.currentMaxGas)
 		for _, tx := range drops {
 			hash := tx.CommonHash()
+			fmt.Println("Removed unpayable queued transaction", "hash", hash)
 			log.Trace("Removed unpayable queued transaction", "hash", hash)
 			pool.all.Remove(hash)
 			//pool.priced.Removed()
 			queuedNofundsCounter.Inc(1)
 		}
 		// Gather all executable transactions and promote them
-		fmt.Println(" == list.Ready ", "pool.pendingState[addr]-", pool.pendingState.GetNonce(addr))
+		fmt.Println("pool.queue[addr] list.txs", addr, list.txs.items)
+		fmt.Println(" == list.Ready ","pool.pendingState[addr]-", pool.pendingState.GetNonce(addr))
 		for _, tx := range list.Ready(pool.pendingState.GetNonce(addr)) {
+			fmt.Println("Promoting queued transaction", "tx", tx)
 		//for _, tx := range list.Ready(pool.pendingState[addr]) {
 			hash := tx.CommonHash()
 			if pool.promoteTx(addr, hash, tx) {
@@ -1028,7 +1032,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 			delete(pool.queue, addr)
 		}
 	}
-	fmt.Printf(" == len(promoted) \n", "promoted-", len(promoted))
+	fmt.Println(" == len(promoted) ", "promoted-", len(promoted))
 	// Notify subsystem for new promoted transactions.
 	if len(promoted) > 0 {
 		go pool.txFeed.Send(NewTxsEvent{promoted})

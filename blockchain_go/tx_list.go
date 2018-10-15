@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"sort"
 
+	"fmt"
 )
 
 // nonceHeap is a heap.Interface implementation over 64bit unsigned integers for
@@ -69,9 +70,11 @@ func (m *txSortedMap) Get(nonce uint64) *Transaction {
 // index. If a transaction already exists with the same nonce, it's overwritten.
 func (m *txSortedMap) Put(tx *Transaction) {
 	nonce := tx.Nonce()
+	fmt.Println("txSortedMap Put", nonce, m.items[nonce])
 	if m.items[nonce] == nil {
 		heap.Push(m.index, nonce)
 	}
+	fmt.Println("txSortedMap Put ", "m.index.Len()",m.index.Len())
 	m.items[nonce], m.cache = tx, nil
 }
 
@@ -175,11 +178,14 @@ func (m *txSortedMap) Remove(nonce uint64) bool {
 func (m *txSortedMap) Ready(start uint64) Transactions {
 	// Short circuit if no transactions are available
 	if m.index.Len() == 0 || (*m.index)[0] > start {
+		fmt.Println("m.index.Len() == 0", start, m.index.Len())
 		return nil
 	}
+	fmt.Println("Ready m.index", start, m.index.Len())
 	// Otherwise start accumulating incremental transactions
 	var ready Transactions
 	for next := (*m.index)[0]; m.index.Len() > 0 && (*m.index)[0] == next; next++ {
+		fmt.Println("Ready next", next, m.index.Len())
 		ready = append(ready, m.items[next])
 		delete(m.items, next)
 		heap.Pop(m.index)

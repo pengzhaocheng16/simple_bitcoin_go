@@ -1188,6 +1188,7 @@ func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
 	}
 	if args.Nonce == nil {
 		nonce, err := b.GetPoolNonce(ctx, args.From)
+		nonce = nonce +1
 		if err != nil {
 			return err
 		}

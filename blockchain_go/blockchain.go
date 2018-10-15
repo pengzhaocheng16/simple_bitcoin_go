@@ -70,7 +70,15 @@ func CreateBlockchain(address, nodeID string) *Blockchain {
 	var tip common.Hash
 	var genesisHash common.Hash
 
-	cbtx := NewCoinbaseTX(address, genesisCoinbaseData,nodeID)
+	statedb, _ := state.New(common.Hash{}, nil,nodeID)
+	var addr = Base58ToCommonAddress([]byte(address))
+	statedb.AddBalance(addr, big.NewInt(subsidy))
+	/*statedb.SetCode(addr, account.Code)*/
+	statedb.SetNonce(addr, 0)
+	/*for key, value := range account.Storage {
+		statedb.SetState(addr, key, value)
+	}*/
+	cbtx := NewCoinbaseTX(0,address, genesisCoinbaseData,nodeID)
 	genesis := NewGenesisBlock(cbtx)
 
 	db, err := bolt.Open(dbFile, 0600, nil)
@@ -984,7 +992,7 @@ func (bc *Blockchain) State() (*state.WalletTransactions, error) {
 
 // StateAt returns a new mutable state based on a particular point in time.
 func (bc *Blockchain) StateAt(root common.Hash) (*state.WalletTransactions, error) {
-	statedb,err := state.New(root, bc.stateCache,bc.NodeId)
+	statedb,err := state.New(root, nil,bc.NodeId)
 	if(err!=nil){
 		log.Println(err)
 	}

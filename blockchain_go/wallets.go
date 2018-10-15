@@ -155,12 +155,12 @@ func GetCurrPath() string {
 	ret := strings.Replace(splitstring[0], "\\", "/", size-1)
 	return ret
 }
-
+/*
 func GetPoolNonce(nodeID,address string)(uint64,error){
 	var wt = new(WalletTransactions)
 	wt.InitDB(nodeID,address)
-	nonce,err := wt.GetTransactionNonce(address)
+	//nonce,err := wt.GetTransactionNonce(address)
 	wt.DB.Close()
 	fmt.Println("===  after GetTransactionNonce: \n")
 	return nonce,err
-}
+}*/
