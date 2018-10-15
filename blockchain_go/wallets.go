@@ -12,10 +12,9 @@ import (
 	"path/filepath"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/common"
+	."./state"
 )
 
-const walletFile = "wallet_%s.dat"
-const walletStateFile = "wallet_state_%s.dat"
 const privKeyBytesLen = 32
 
 // Wallets stores a collection of wallets
@@ -27,7 +26,7 @@ type Wallets struct {
 func NewWallets(nodeID string) (*Wallets, error) {
 	wallets := Wallets{}
 	wallets.Wallets = make(map[string]*Wallet)
-	nodeID = genWalletFileName(nodeID)
+	nodeID = GenWalletFileName(nodeID)
 	err := wallets.LoadFromFile(nodeID)
 
 	return &wallets, err
@@ -113,26 +112,6 @@ func (ws *Wallets) LoadFromFile(nodeID string) error {
 
 	return nil
 }
-
-func genWalletFileName(nodeID string)string{
-	nodeID = strings.Replace(nodeID, ":", "_", -1)
-	return nodeID
-}
-
-func GenWalletDbName(nodeID string)string{
-	nodeID = genWalletFileName(nodeID)
-	walletFile := fmt.Sprintf(walletFile, nodeID)
-
-	return walletFile
-}
-
-func GenWalletStateDbName(nodeID string)string{
-	nodeID = genWalletFileName(nodeID)
-	walletFile := fmt.Sprintf(walletStateFile, nodeID)
-
-	return walletFile
-}
-
 
 
 // SaveToFile saves wallets to a file

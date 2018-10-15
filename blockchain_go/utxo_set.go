@@ -8,6 +8,7 @@ import (
 	"math"
 	"fmt"
 	."../boltqueue"
+	."./state"
 	"math/big"
 	"github.com/ethereum/go-ethereum/common"
 )

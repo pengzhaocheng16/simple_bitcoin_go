@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"github.com/ethereum/go-ethereum/rlp"
 	."../boltqueue"
+	."./state"
 )
 
 const subsidy = 50
@@ -496,7 +497,7 @@ func PendingIn(chainId string,tx *Transaction){
 	//queueFile := fmt.Sprintf("%x_tx.db", wallet.GetAddress())
 	queueFile := GenWalletStateDbName(chainId)
 	//fmt.Printf("===af GenWalletStateDbName  \n")
-	if dbExists(dbFile) {
+	if DbExists(dbFile) {
 		fmt.Println("wallet transaction file already exists.PendingIn")
 		//os.Exit(1)
 	}

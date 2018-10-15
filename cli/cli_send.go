@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"../blockchain_go"
+	"../blockchain_go/state"
 	"../p2pprotocol"
 	"time"
 	"encoding/hex"
@@ -51,7 +52,7 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 		//In case of double spend check fail need to store prev uncomfirmed transaction input tx
 		core.PendingIn(nodeID,tx)
 		address := wallet.ToCommonAddress().String()
-		var wt = new(core.WalletTransactions)
+		var wt = new(state.WalletTransactions)
 		wt.InitDB(nodeID,address)
 		wt.PutTransaction(tx.ID,tx.Serialize(),address)
 		wt.DB.Close()

@@ -18,6 +18,7 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"gopkg.in/karalabe/cookiejar.v2/collections/prque"
 	"sort"
+	."./state"
 )
 
 const TxPoolBucket = "TxPool"
@@ -511,8 +512,8 @@ func (pool *TxPool) reset(oldHead, newHead *Block) {
 	if newHead == nil {
 		//newHead = pool.Bc.CurrentBlock().Header() // Special case during testing
 		newHead = pool.Bc.CurrentBlock() // Special case during testing
-	}
-	/*statedb, err := pool.Bc.StateAt(newHead.Root)
+	}/*
+	statedb, err := pool.Bc.StateAt(newHead.Root)
 	if err != nil {
 		log.Error("Failed to reset txpool state", "err", err)
 		return

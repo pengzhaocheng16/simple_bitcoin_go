@@ -27,6 +27,7 @@ import (
 
 	"../blockchain_go/rawdb"
 	"../p2p/nat"
+	"../blockchain_go/state"
 )
 
 const protocol = "tcp"
@@ -623,7 +624,7 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 			}
 
 			fmt.Println("==>VerifyTx ")
-			queueFile := core.GenWalletStateDbName(bc.NodeId)
+			queueFile := state.GenWalletStateDbName(bc.NodeId)
 			pqueue, errcq := NewPQueue(queueFile)
 			if errcq != nil {
 				log.Panic("create queue error",errcq)
@@ -1104,7 +1105,7 @@ func enqueueVersion(myLastHash []byte){
 //TODO if there is blockchain conflict (blockchain fork) then the data is not valid need to delete all comfirmed uncomfirmed transactions
 func confirmTx(newblock *core.Block,nodeID string) bool {
 	//queueFile := fmt.Sprintf("%x_tx.db", wallet.GetAddress())
-	queueFile := core.GenWalletStateDbName(nodeID)
+	queueFile := state.GenWalletStateDbName(nodeID)
 	txPQueue, err := NewPQueue(queueFile)
 	log.Println("-- af NewPQueue \n")
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"../blockchain_go/rawdb"
 	."../boltqueue"
+	."./state"
 	/*"time"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/common/mclock"
@@ -58,7 +59,7 @@ func genBlockChainDbName(nodeID string)string{
 func CreateBlockchain(address, nodeID string) *Blockchain {
 	dbFile := genBlockChainDbName(nodeID)
 	fmt.Printf("Blockchain file %s\n",dbFile)
-	if dbExists(dbFile) {
+	if DbExists(dbFile) {
 		fmt.Println("Blockchain already exists.")
 		os.Exit(1)
 	}
@@ -120,7 +121,7 @@ func CreateBlockchain(address, nodeID string) *Blockchain {
 func NewBlockchain(nodeID string) *Blockchain {
 	var dbFile = genBlockChainDbName(nodeID)
 	fmt.Printf("Blockchain file %s\n",dbFile)
-	if dbExists(dbFile) == false {
+	if DbExists(dbFile) == false {
 		fmt.Println("No existing blockchain found. Create one first.")
 		os.Exit(1)
 	}
@@ -488,15 +489,6 @@ func (bc *Blockchain) VerifyTransaction(tx *Transaction) bool {
 
 }
 
-
-
-func dbExists(dbFile string) bool {
-	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
-		return false
-	}
-
-	return true
-}
 
 // make sure block is valid by checking height, and comparing the hash of the previous block
 // ,and block hash,and block pow result,and transaction consistent(time line,utxo,tx address,coinbasetx)
