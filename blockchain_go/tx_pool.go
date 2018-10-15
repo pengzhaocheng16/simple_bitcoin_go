@@ -526,6 +526,7 @@ func (pool *TxPool) reset(oldHead, newHead *Block) {
 	pool.currentMaxGas = 0
 
 	// Inject any transactions discarded due to reorgs
+	fmt.Println("Reinjecting stale transactions", "count", len(reinject))
 	log.Debug("Reinjecting stale transactions", "count", len(reinject))
 	senderCacher.recover(pool.Signer, reinject)
 	pool.addTxsLocked(reinject, false)
