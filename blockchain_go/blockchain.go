@@ -984,11 +984,12 @@ func (bc *Blockchain) State() (*state.WalletTransactions, error) {
 
 // StateAt returns a new mutable state based on a particular point in time.
 func (bc *Blockchain) StateAt(root common.Hash) (*state.WalletTransactions, error) {
-	statedb,err := state.New(root, bc.stateCache)
+	statedb,err := state.New(root, bc.stateCache,bc.NodeId)
 	if(err!=nil){
 		log.Println(err)
 	}
 	statedb.InitDB(bc.NodeId,"")
 	bc.stateCache = statedb.DB
+	defer statedb.DB.Close()
 	return statedb,err
 }

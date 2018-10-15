@@ -30,6 +30,7 @@ type revision struct {
 }
 type WalletTransactions struct {
 	DB *bolt.DB
+	NodeId string
 	//trie trie.Trie
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
@@ -89,13 +90,14 @@ func DbExists(dbFile string) bool {
 }
 
 // Create a new state from a given trie.
-func New(root common.Hash, db *bolt.DB) (*WalletTransactions, error) {
+func New(root common.Hash, db *bolt.DB,nodeId string) (*WalletTransactions, error) {
 	/*tr, err := db.OpenTrie(root)
 	if err != nil {
 		return nil, err
 	}*/
 	return &WalletTransactions{
 		DB:                db,
+		NodeId:nodeId,
 		//trie:              tr,
 		stateObjects:      make(map[common.Address]*stateObject),
 		stateObjectsDirty: make(map[common.Address]struct{}),
@@ -266,6 +268,8 @@ func (uts *WalletTransactions) GetTransactionNonce(address string) (uint64, erro
 func (uts *WalletTransactions) TryGet(address []byte) ([]byte, error) {
 	var cb []byte
 
+	uts.InitDB(uts.NodeId,"")
+	defer uts.DB.Close()
 	err := uts.DB.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(state+"_"+crypto.Keccak256Hash(address[:]).String()))
 
@@ -364,4 +368,13 @@ func (self *WalletTransactions) AddBalance(addr common.Address, amount *big.Int)
 	if stateObject != nil {
 		stateObject.AddBalance(amount)
 	}
+}
+
+// Retrieve the balance from the given address or 0 if object not found
+func (self *WalletTransactions) GetBalance(addr common.Address) *big.Int {
+	stateObject := self.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.Balance()
+	}
+	return common.Big0
 }

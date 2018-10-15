@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"github.com/boltdb/bolt"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -161,6 +160,7 @@ type TxPool struct {
 	currentMaxGas uint64              // Current gas limit for transaction caps
 
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
+	journal *txJournal  // Journal of local transaction to back up to disk
 
 	pending map[common.Address]*txList   // All currently processable transactions
 	queue   map[common.Address]*txList   // Queued but non-processable transactions
@@ -168,6 +168,8 @@ type TxPool struct {
 	all     *txLookup                    // All transactions to allow lookups
 
 	wg sync.WaitGroup // for shutdown sync
+
+	homestead bool
 }
 
 func NewTxPool(config TxPoolConfig,chainconfig *params.ChainConfig,bc *Blockchain)*TxPool{
@@ -196,6 +198,17 @@ func NewTxPool(config TxPoolConfig,chainconfig *params.ChainConfig,bc *Blockchai
 
 	pool.reset(nil, bc.CurrentBlock())
 
+	// If local transactions and journaling is enabled, load from disk
+	if !config.NoLocals && config.Journal != "" {
+		pool.journal = newTxJournal(config.Journal)
+
+		if err := pool.journal.load(pool.AddLocals); err != nil {
+			log.Warn("Failed to load transaction journal", "err", err)
+		}
+		if err := pool.journal.rotate(pool.local()); err != nil {
+			log.Warn("Failed to rotate transaction journal", "err", err)
+		}
+	}
 	// Subscribe events from blockchain
 	pool.chainHeadSub = pool.Bc.SubscribeChainHeadEvent(pool.chainHeadCh)
 
@@ -221,8 +234,8 @@ func (pool *TxPool) loop() {
 	evict := time.NewTicker(evictionInterval)
 	defer evict.Stop()
 
-	/*journal := time.NewTicker(pool.config.Rejournal)
-	defer journal.Stop()*/
+	journal := time.NewTicker(pool.config.Rejournal)
+	defer journal.Stop()
 
 	// Track the previous head headers for transaction reorgs
 	head := pool.Bc.CurrentBlock()
@@ -235,9 +248,9 @@ func (pool *TxPool) loop() {
 		case ev := <-pool.chainHeadCh:
 			if ev.Block != nil {
 				pool.mu.Lock()
-				/*if pool.chainconfig.IsHomestead(ev.Block.Height) {
+				if pool.chainconfig.IsHomestead(ev.Block.Height) {
 					pool.homestead = true
-				}*/
+				}
 				pool.Bc = NewBlockchain(pool.Bc.NodeId)
 				defer pool.Bc.Db.Close()
 				//pool.reset(head.Header(), ev.Block.Header())
@@ -280,14 +293,14 @@ func (pool *TxPool) loop() {
 			pool.mu.Unlock()
 
 			// Handle local transaction journal rotation
-		/*case <-journal.C:
+		case <-journal.C:
 			if pool.journal != nil {
 				pool.mu.Lock()
 				if err := pool.journal.rotate(pool.local()); err != nil {
 					log.Warn("Failed to rotate local tx journal", "err", err)
 				}
 				pool.mu.Unlock()
-			}*/
+			}
 		}
 	}
 }
@@ -381,11 +394,12 @@ func (uts *TxPool) insert(tx *Transaction) error {
 // deemed to have been sent from a local account.
 func (pool *TxPool) journalTx(from common.Address, tx *Transaction) {
 	// Only journal if it's enabled and the transaction is local
-	//if pool.journal == nil || !pool.locals.contains(from) {
-	if !pool.locals.contains(from) {
+	if pool.journal == nil || !pool.locals.contains(from) {
+	//if !pool.locals.contains(from) {
 		return
 	}
-	if err := pool.insert(tx); err != nil {
+	//if err := pool.insert(tx); err != nil {
+	if err := pool.journal.insert(tx); err != nil {
 		log.Warn("Failed to journal local transaction", "err", err)
 	}
 }
@@ -557,9 +571,9 @@ func (pool *TxPool) Stop() {
 	pool.chainHeadSub.Unsubscribe()
 	pool.wg.Wait()
 
-	/*if pool.journal != nil {
+	if pool.journal != nil {
 		pool.journal.close()
-	}*/
+	}
 	log.Info("Transaction pool stopped")
 }
 
@@ -676,16 +690,16 @@ func (pool *TxPool) validateTx(tx *Transaction, local bool) error {
 		return ErrUnderpriced
 	}*/
 	// Ensure the transaction adheres to nonce ordering
-	//if pool.currentState.GetNonce(from) > tx.Nonce() {
-	if nonce,_ := GetPoolNonce(pool.Bc.NodeId,from.String());nonce > tx.Nonce() {
+	if pool.currentState.GetNonce(from) > tx.Nonce() {
+	//if nonce,_ := GetPoolNonce(pool.Bc.NodeId,from.String());nonce > tx.Nonce() {
 		return ErrNonceTooLow
 	}
-	/*// Transactor should have enough funds to cover the costs
+	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
 	if pool.currentState.GetBalance(from).Cmp(tx.Cost()) < 0 {
 		return ErrInsufficientFunds
 	}
-	intrGas, err := IntrinsicGas(tx.Data(), tx.To() == nil, pool.homestead)
+	/*intrGas, err := IntrinsicGas(tx.Data(), tx.To() == nil, pool.homestead)
 	if err != nil {
 		return err
 	}
@@ -970,17 +984,17 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 			continue // Just in case someone calls with a non existing account
 		}
 		// Drop all transactions that are deemed too old (low nonce)
-		//for _, tx := range list.Forward(pool.currentState.GetNonce(addr)) {
-		nonce,_ := GetPoolNonce(pool.Bc.NodeId,addr.String())
-		for _, tx := range list.Forward(nonce) {
+		for _, tx := range list.Forward(pool.currentState.GetNonce(addr)) {
+			//nonce,_ := GetPoolNonce(pool.Bc.NodeId,addr.String())
+			//for _, tx := range list.Forward(nonce) {
 			hash := tx.CommonHash()
 			log.Trace("Removed old queued transaction", "hash", hash)
 			pool.all.Remove(hash)
 			//pool.priced.Removed()
 		}
 		// Drop all transactions that are too costly (low balance or out of gas)
-		//drops, _ := list.Filter(pool.currentState.GetBalance(addr), pool.currentMaxGas)
-		drops, _ := list.Filter(big.NewInt(int64(nonce)), pool.currentMaxGas)
+		drops, _ := list.Filter(pool.currentState.GetBalance(addr), pool.currentMaxGas)
+		//drops, _ := list.Filter(big.NewInt(int64(nonce)), pool.currentMaxGas)
 		for _, tx := range drops {
 			hash := tx.CommonHash()
 			log.Trace("Removed unpayable queued transaction", "hash", hash)
@@ -1144,8 +1158,8 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 func (pool *TxPool) demoteUnexecutables() {
 	// Iterate over all accounts and demote any non-executable transactions
 	for addr, list := range pool.pending {
-		//nonce := pool.currentState.GetNonce(addr)
-		nonce,_ := GetPoolNonce(pool.Bc.NodeId,addr.String())
+		nonce := pool.currentState.GetNonce(addr)
+		//nonce,_ := GetPoolNonce(pool.Bc.NodeId,addr.String())
 
 		// Drop all transactions that are deemed too old (low nonce)
 		for _, tx := range list.Forward(nonce) {
@@ -1155,8 +1169,8 @@ func (pool *TxPool) demoteUnexecutables() {
 			//pool.priced.Removed()
 		}
 		// Drop all transactions that are too costly (low balance or out of gas), and queue any invalids back for later
-		//drops, invalids := list.Filter(pool.currentState.GetBalance(addr), pool.currentMaxGas)
-		drops, invalids := list.Filter(big.NewInt(int64(nonce)), pool.currentMaxGas)
+		drops, invalids := list.Filter(pool.currentState.GetBalance(addr), pool.currentMaxGas)
+		//drops, invalids := list.Filter(big.NewInt(int64(nonce)), pool.currentMaxGas)
 		for _, tx := range drops {
 			hash := tx.CommonHash()
 			log.Trace("Removed unpayable pending transaction", "hash", hash)
