@@ -81,6 +81,15 @@ func NewGenesisBlock(coinbase *Transaction) *Block {
 }
 
 // HashTransactions returns a hash of the transactions in the block
+func (b *Block) GetTransactions() []*Transaction {
+	var transactions []*Transaction
+	for _, tx := range b.Transactions {
+		transactions = append(transactions, tx)
+	}
+	return transactions
+}
+
+// HashTransactions returns a hash of the transactions in the block
 func (b *Block) HashTransactions() []byte {
 	var transactions [][]byte
 
@@ -218,7 +227,7 @@ func calcDifficultyHomestead(time uint64, parent *Block) *big.Int {
 }
 
 
-// HashTransactions returns a hash of the transactions in the block
+// Hashransactions returns a has of the transactions in the block
 func (b *Block) HasTransactions(TxId []byte) bool{
 
 	for _, tx := range b.Transactions {

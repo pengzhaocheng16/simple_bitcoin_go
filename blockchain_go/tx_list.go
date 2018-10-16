@@ -178,7 +178,7 @@ func (m *txSortedMap) Remove(nonce uint64) bool {
 func (m *txSortedMap) Ready(start uint64) Transactions {
 	// Short circuit if no transactions are available
 	if m.index.Len() == 0 || (*m.index)[0] > start {
-		fmt.Println("m.index.Len() == 0", start, m.index.Len())
+		fmt.Println("m.index.Len() == 0", start, (*m.index)[0],m.index.Len())
 		return nil
 	}
 	fmt.Println("Ready m.index", start, m.index.Len())

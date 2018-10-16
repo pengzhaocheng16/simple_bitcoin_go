@@ -289,7 +289,8 @@ func (uts *WalletTransactions) TryGet(address []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cb, nil
+	fmt.Println("enc 1 ",cb)
+	return cb[:], nil
 }
 
 
@@ -299,8 +300,11 @@ func (uts *WalletTransactions) TryUpdate(address,data []byte) ( error) {
 	uts.InitDB(uts.NodeId,"")
 	defer uts.DB.Close()
 	err = uts.DB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(state+"_"+crypto.Keccak256Hash(address[:]).String()))
+		b,err := tx.CreateBucketIfNotExists([]byte(state+"_"+crypto.Keccak256Hash(address[:]).String()))
 
+		if err!=nil{
+			return err
+		}
 		if b == nil {
 			return NewDBIsNotReadyError()
 		}
@@ -325,8 +329,11 @@ func (uts *WalletTransactions) TryDelete(address []byte) ( error) {
 	uts.InitDB(uts.NodeId,"")
 	defer uts.DB.Close()
 	err = uts.DB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(state+"_"+crypto.Keccak256Hash(address[:]).String()))
+		b,err := tx.CreateBucketIfNotExists([]byte(state+"_"+crypto.Keccak256Hash(address[:]).String()))
 
+		if err!=nil{
+			return err
+		}
 		if b == nil {
 			return NewDBIsNotReadyError()
 		}
@@ -490,7 +497,8 @@ func (self *WalletTransactions) SetState(addr common.Address, key, value common.
 // updateStateObject writes the given object to the trie.
 func (self *WalletTransactions) updateStateObject(stateObject *stateObject) {
 	addr := stateObject.Address()
-	data, err := rlp.EncodeToBytes(stateObject)
+	data, err := rlp.EncodeToBytes(stateObject.data)
+	fmt.Println("enc data-", data)
 	if err != nil {
 		panic(fmt.Errorf("can't encode object at %x: %v", addr[:], err))
 	}
@@ -517,13 +525,18 @@ func (self *WalletTransactions) getStateObject(addr common.Address) (stateObject
 
 	// Load the object from the database.
 	//enc, err := self.trie.TryGet(addr[:])
-	enc, err := self.TryGet(addr[:])
-	if len(enc) == 0 {
+	enc1, err := self.TryGet(addr[:])
+	if err !=nil {
+		self.setError(err)
+		return nil
+	}
+	fmt.Println("enc-", enc1)
+	if len(enc1) == 0 {
 		self.setError(err)
 		return nil
 	}
 	var data Account
-	if err := rlp.DecodeBytes(enc, &data); err != nil {
+	if err := rlp.DecodeBytes(enc1, &data); err != nil {
 		log.Error("Failed to decode state object", "addr", addr, "err", err)
 		return nil
 	}

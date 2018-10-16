@@ -589,13 +589,21 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 
 	p.MarkTransaction(tx.ID)
 
+	var pendingState = Manager.txPool.State()
+	// Make sure the transaction is signed properly
+	from, err := core.Sender(Manager.txPool.Signer, &tx)
+	if err != nil {
+		log.Fatal("error",core.ErrInvalidSender)
+	}
+	pendingState.SetNonce(from,tx.Nonce())
+
 	Manager.TxMempool[hex.EncodeToString(tx.ID)] = &tx
 	txs := []*core.Transaction{&tx}
 	Manager.txPool.AddRemotes(txs)
 
-	var tnxs core.Transactions
+	/*var tnxs core.Transactions
 	tnxs = append(tnxs, &tx)
-	Manager.BroadcastTxs(tnxs)
+	Manager.BroadcastTxs(tnxs)*/
 
 	if nodeAddress == BootNodes[0] {
 		/*for _, node := range BootNodes {
@@ -655,12 +663,7 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 				return errResp(2, "transactions empty" )
 			}
 
-			block := bc.CurrentBlock()
-			statedb, err := bc.StateAt(block.Root())
-			if(err !=nil){
-				log.Panic(err)
-			}
-			var pendingState = state.ManageState(statedb)
+			var pendingState = Manager.txPool.State()
 			fmt.Println("==>NewCoinbaseTX ")
 			var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(miningAddress)))
 			cbTx := core.NewCoinbaseTX(nonce+1,miningAddress, "",bc.NodeId)
@@ -691,17 +694,13 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 				txID := hex.EncodeToString(tx.ID)
 				delete(Manager.TxMempool, txID)
 				//commit transaction nonce
-				statedb, err := bc.StateAt(newBlock.Root())
-				if(err !=nil){
-					log.Panic(err)
-				}
-				var pendingState = state.ManageState(statedb)
+				var pendingState = Manager.txPool.State()
 				from, err := core.Sender(Manager.txPool.Signer, tx)
 				if err != nil {
 					log.Panic( core.ErrInvalidSender)
 				}
 				pendingState.SetNonce(from,tx.Data.AccountNonce)
-				statedb.Finalise(true)
+				//statedb.Finalise(true)
 			}
 
 			fmt.Println("==>after mine len(Manager.TxMempool) ",len(Manager.TxMempool))

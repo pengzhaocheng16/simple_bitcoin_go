@@ -228,6 +228,7 @@ func (self *stateObject) updateRoot(db *bolt.DB) {
 	self.updateTrie(db)
 	//TODO merkle hash tree root
 	//self.data.Root = self.trie.Hash()
+	self.data.Root = common.Hash{}
 }
 
 // CommitTrie the storage trie of the object to db.

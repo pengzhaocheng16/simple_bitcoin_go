@@ -6,6 +6,11 @@ import (
 	"../blockchain_go"
 	"github.com/boltdb/bolt"
 	"bytes"
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/core/state"
+	"math/big"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 //定义一个person结构，类似于在PHP定义了一个person的class
@@ -25,12 +30,31 @@ func main() {
 	A(a)
 	fmt.Println("我在A后面输出", a) //很显然,A里面的赋值并没有改变a的值，证明结构是值类型，传值是值拷贝
 
-	bc := core.NewBlockchain("192.168.43.134:2001")
-	defer bc.Db.Close()
-	UTXOSet := core.UTXOSet{bc}
-	UTXOSet.Reindex()
+	//bc := core.NewBlockchain("localhost:2001")
+	//defer bc.Db.Close()
+	//UTXOSet := core.UTXOSet{bc}
+	//UTXOSet.Reindex()
 
 	//update(bc,&UTXOSet)
+	//TestRlp()
+
+	fmt.Println(TestArrayReturn())
+}
+
+func TestArrayReturn()[]byte{
+	return common.Hash{}.Bytes()
+}
+
+func TestRlp(){
+	account := state.Account{1,big.NewInt(5),common.Hash{}, crypto.Keccak256(nil)}
+	enc, _ := rlp.EncodeToBytes(account)
+
+	fmt.Println("enc-", enc)
+	var data state.Account
+	if err := rlp.DecodeBytes(enc, &data); err != nil {
+		log.Panic("Failed to decode state object", "addr",  crypto.Keccak256(nil), "err", err)
+
+	}
 }
 
 //结构也是值类型，传值的时候也是值拷贝

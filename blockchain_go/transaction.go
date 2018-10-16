@@ -149,7 +149,10 @@ func (tx *Transaction) HashCommon() common.Hash {
 
 	return common.BytesToHash(hash)
 }
+func (tx *Transaction) RawSignatureValues()( *big.Int, *big.Int, *big.Int) {
 
+	return tx.Data.V,tx.Data.R,tx.Data.S
+}
 // Sign signs each input of a Transaction
 func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transaction) {
 	if tx.IsCoinbase() {

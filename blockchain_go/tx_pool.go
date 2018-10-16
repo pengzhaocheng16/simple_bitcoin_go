@@ -108,6 +108,7 @@ type TxPoolConfig struct {
 // DefaultTxPoolConfig contains the default configurations for the transaction
 // pool.
 var DefaultTxPoolConfig = TxPoolConfig{
+	NoLocals:false,
 	Journal:   "transactions.rlp",
 	Rejournal: time.Hour,
 
@@ -1005,7 +1006,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 			queuedNofundsCounter.Inc(1)
 		}
 		// Gather all executable transactions and promote them
-		fmt.Println("pool.queue[addr] list.txs", addr, list.txs.items)
+		fmt.Println("pool.queue[addr] list.txs.items", addr, list.txs.items)
 		fmt.Println(" == list.Ready ","pool.pendingState[addr]-", pool.pendingState.GetNonce(addr))
 		for _, tx := range list.Ready(pool.pendingState.GetNonce(addr)) {
 			fmt.Println("Promoting queued transaction", "tx", tx)

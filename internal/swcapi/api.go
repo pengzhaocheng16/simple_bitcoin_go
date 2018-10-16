@@ -901,7 +901,7 @@ func (s *PublicBlockChainAPI) rpcOutputBlock(b *core.Block, inclTx bool, fullTx 
 
 	return fields, nil
 }
-/*
+
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
 	BlockHash        common.Hash     `json:"blockHash"`
@@ -922,20 +922,20 @@ type RPCTransaction struct {
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
-	var signer types.Signer = types.FrontierSigner{}
-	if tx.Protected() {
+func newRPCTransaction(tx *core.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
+	var signer core.Signer = core.FrontierSigner{}
+	/*if tx.Protected() {
 		signer = types.NewEIP155Signer(tx.ChainId())
-	}
-	from, _ := types.Sender(signer, tx)
+	}*/
+	from, _ := core.Sender(signer, tx)
 	v, r, s := tx.RawSignatureValues()
 
 	result := &RPCTransaction{
 		From:     from,
-		Gas:      hexutil.Uint64(tx.Gas()),
-		GasPrice: (*hexutil.Big)(tx.GasPrice()),
-		Hash:     tx.Hash(),
-		Input:    hexutil.Bytes(tx.Data()),
+		Gas:      hexutil.Uint64(tx.Gas().Uint64()),
+		//GasPrice: (*hexutil.Big)(tx.GasPrice()),
+		Hash:     tx.CommonHash(),
+		Input:    hexutil.Bytes(tx.Data.Payload),
 		Nonce:    hexutil.Uint64(tx.Nonce()),
 		To:       tx.To(),
 		Value:    (*hexutil.Big)(tx.Value()),
@@ -952,22 +952,22 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 }
 
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
-func newRPCPendingTransaction(tx *types.Transaction) *RPCTransaction {
+func newRPCPendingTransaction(tx *core.Transaction) *RPCTransaction {
 	return newRPCTransaction(tx, common.Hash{}, 0, 0)
 }
 
 // newRPCTransactionFromBlockIndex returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockIndex(b *types.Block, index uint64) *RPCTransaction {
-	txs := b.Transactions()
+func newRPCTransactionFromBlockIndex(b *core.Block, index uint64) *RPCTransaction {
+	txs := b.Transactions
 	if index >= uint64(len(txs)) {
 		return nil
 	}
-	return newRPCTransaction(txs[index], b.Hash(), b.NumberU64(), index)
+	return newRPCTransaction(txs[index], b.Hash, b.NumberU64(), index)
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.
-func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.Bytes {
-	txs := b.Transactions()
+func newRPCRawTransactionFromBlockIndex(b *core.Block, index uint64) hexutil.Bytes {
+	txs := b.Transactions
 	if index >= uint64(len(txs)) {
 		return nil
 	}
@@ -976,15 +976,15 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.By
 }
 
 // newRPCTransactionFromBlockHash returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockHash(b *types.Block, hash common.Hash) *RPCTransaction {
-	for idx, tx := range b.Transactions() {
-		if tx.Hash() == hash {
+func newRPCTransactionFromBlockHash(b *core.Block, hash common.Hash) *RPCTransaction {
+	for idx, tx := range b.Transactions {
+		if tx.CommonHash() == hash {
 			return newRPCTransactionFromBlockIndex(b, uint64(idx))
 		}
 	}
 	return nil
 }
-*/
+
 
 // PublicTransactionPoolAPI exposes methods for the RPC interface
 type PublicTransactionPoolAPI struct {
@@ -1188,7 +1188,7 @@ func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
 	}
 	if args.Nonce == nil {
 		nonce, err := b.GetPoolNonce(ctx, args.From)
-		nonce = nonce +1
+		//nonce = nonce +1
 		if err != nil {
 			return err
 		}
@@ -1360,7 +1360,7 @@ func (s *PublicTransactionPoolAPI) SignTransaction(ctx context.Context, args Sen
 	}
 	return &SignTransactionResult{data, tx}, nil
 }
-
+*/
 // PendingTransactions returns the transactions that are in the transaction pool and have a from address that is one of
 // the accounts this node manages.
 func (s *PublicTransactionPoolAPI) PendingTransactions() ([]*RPCTransaction, error) {
@@ -1371,18 +1371,19 @@ func (s *PublicTransactionPoolAPI) PendingTransactions() ([]*RPCTransaction, err
 
 	transactions := make([]*RPCTransaction, 0, len(pending))
 	for _, tx := range pending {
-		var signer types.Signer = types.HomesteadSigner{}
-		if tx.Protected() {
-			signer = types.NewEIP155Signer(tx.ChainId())
-		}
-		from, _ := types.Sender(signer, tx)
-		if _, err := s.b.AccountManager().Find(accounts.Account{Address: from}); err == nil {
+		//var signer core.Signer = core.HomesteadSigner{}
+		/*if tx.Protected() {
+			signer = core.NewEIP155Signer(tx.ChainId())
+		}*/
+		//from, _ := core.Sender(signer, tx)
+		//if _, err := s.b.AccountManager().Find(accounts.Account{Address: from}); err == nil {
+
 			transactions = append(transactions, newRPCPendingTransaction(tx))
-		}
+		//}
 	}
 	return transactions, nil
 }
-
+/*
 // Resend accepts an existing transaction and a new gas price and limit. It will remove
 // the given transaction from the pool and reinsert it with the new gas price and limit.
 func (s *PublicTransactionPoolAPI) Resend(ctx context.Context, sendArgs SendTxArgs, gasPrice *hexutil.Big, gasLimit *hexutil.Uint64) (common.Hash, error) {
