@@ -595,7 +595,10 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 	if err != nil {
 		log.Fatal("error",core.ErrInvalidSender)
 	}
-	pendingState.SetNonce(from,tx.Nonce())
+	var nonce = pendingState.GetNonce(from)
+	if nonce < tx.Data.AccountNonce {
+		pendingState.SetNonce(from, tx.Nonce())
+	}
 
 	Manager.TxMempool[hex.EncodeToString(tx.ID)] = &tx
 	txs := []*core.Transaction{&tx}
@@ -604,6 +607,15 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 	/*var tnxs core.Transactions
 	tnxs = append(tnxs, &tx)
 	Manager.BroadcastTxs(tnxs)*/
+
+	pending, err := Manager.txPool.Pending()
+	if err != nil {
+		log.Panic(err)
+	}
+	var txlist core.Transactions
+	for _, batch := range pending {
+		txlist = append(txlist, batch...)
+	}
 
 	if nodeAddress == BootNodes[0] {
 		/*for _, node := range BootNodes {
@@ -615,7 +627,8 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 		//sendInv(p.Rw, "tx", [][]byte{tx.ID})
 	} else {
 		fmt.Println("==>len tx")
-		if len(Manager.TxMempool) >= 2 && len(miningAddress) > 0 {
+		//if len(Manager.TxMempool) >= 2 && len(miningAddress) > 0 {
+		if len(txlist) >= 2 && len(miningAddress) > 0 {
 		MineTransactions:
 			var txs []*core.Transaction
 
@@ -639,7 +652,8 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 			}
 			defer pqueue.Close()
 			var sizeTotal float64 = 0
-			for id,txMine := range Manager.TxMempool {
+			//for id,txMine := range Manager.TxMempool {
+			for _,txMine := range txlist {
 				//in case of double spend
 				for _, vin := range txMine.Vin {
 					pqueue.SetMsg(1, vin.Txid, txMine.ID)
@@ -647,8 +661,8 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 				//verify transaction
 				//block txs size limit to 4M
 				if(core.VerifyTx(*txMine,bc) && sizeTotal < 4 * 1024 *1024) {
-					sizeTotal = sizeTotal + float64(Manager.TxMempool[id].Size())
-					txs = append(txs, Manager.TxMempool[id])
+					sizeTotal = sizeTotal + float64(txMine.Size())
+					txs = append(txs, txMine)
 				}
 			}
 			if len(txs)>1 && len(txs) < 2 && len(miningAddress) > 0 {
@@ -689,7 +703,7 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 						}
 					}
 				}
-			}
+			}/*
 			for _, tx := range txs {
 				txID := hex.EncodeToString(tx.ID)
 				delete(Manager.TxMempool, txID)
@@ -700,11 +714,13 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 					log.Panic( core.ErrInvalidSender)
 				}
 				pendingState.SetNonce(from,tx.Data.AccountNonce)
-				//statedb.Finalise(true)
-			}
 
-			fmt.Println("==>after mine len(Manager.TxMempool) ",len(Manager.TxMempool))
-			if len(Manager.TxMempool) > 0 {
+				//statedb.Finalise(true)
+			}*/
+
+			fmt.Println("==>after mine len(txlist) ",len(txlist))
+			//if len(Manager.TxMempool) > 0 {
+			if len(txlist) > 0 {
 				goto MineTransactions
 			}
 		}
