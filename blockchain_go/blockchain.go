@@ -380,6 +380,7 @@ func (bc *Blockchain) GetBlockHashes(lastHash string) [][]byte {
 			stopBlock = true
 			continue
 		}
+		fmt.Printf("--------->GetBlockHashes 3 lastHash %s\n", lastHash)
 		if(!stopBlock){
 			blocks = append(blocks, block.Hash.Bytes())
 		}else{
@@ -673,27 +674,29 @@ func calculateHash(block *Block) ([]byte,*ProofOfWork) {
 // Delete Blocks returns a list of hashes of all the blocks after a block in the chain
 func (bc *Blockchain) DelBlockHashes(hashs map[string]common.Hash) [][]byte {
 	var blocks [][]byte
-	bci := bc.Iterator()
+	if(len(hashs) > 0 ) {
+		bci := bc.Iterator()
 
-	for{
-		block := bci.Next()
-		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes())  {
-			break
-		}
-		if _, ok := hashs[hex.EncodeToString(block.Hash.Bytes())]; ok  {
-			err := bc.Db.Update(func(tx *bolt.Tx) error {
-				b, err := tx.CreateBucket([]byte(blocksBucket))
-				if err != nil {
+		for {
+			block := bci.Next()
+			if bytes.Equal(block.PrevBlockHash.Bytes(), common.BytesToHash([]byte{}).Bytes()) {
+				break
+			}
+			if _, ok := hashs[hex.EncodeToString(block.Hash.Bytes())]; ok {
+				err := bc.Db.Update(func(tx *bolt.Tx) error {
+					b, err := tx.CreateBucket([]byte(blocksBucket))
+					if err != nil {
+						log.Panic(err)
+					}
+					return b.Delete(block.Hash.Bytes())
+				})
+				if (err != nil) {
 					log.Panic(err)
 				}
-				return b.Delete(block.Hash.Bytes())
-			})
-			if(err != nil){
-				log.Panic(err)
+				blocks = append(blocks, block.Hash.Bytes())
 			}
-			blocks = append(blocks, block.Hash.Bytes())
-		}
 
+		}
 	}
 	fmt.Printf("delete blocks with %d \n", len(blocks))
 
@@ -745,6 +748,9 @@ func (bc *Blockchain) GetBlockByNumber(number uint64) *Block {
 	})
 	if err != nil {
 		log.Panic(err)
+	}
+	if lastBlock.Height.Uint64() != number {
+		log.Panic(errors.New("ERROR:block number not same"))
 	}
 	return &lastBlock
 }

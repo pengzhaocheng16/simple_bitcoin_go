@@ -309,9 +309,15 @@ func SendVersion(addr p2p.MsgWriter, bc *core.Blockchain) {
 }
 
 func SendVersionStartConflict(addr p2p.MsgWriter, historyLasthash []byte, bc *core.Blockchain) {
-	historyLastblock,err := bc.GetBlock(historyLasthash)
-	if err != nil {
-		log.Panic("create queue error",err)
+	var historyLastblock core.Block
+	if historyLasthash == nil {
+		historyLastblock = *bc.GetBlockByNumber(0)
+	}else{
+		var err error
+		historyLastblock,err = bc.GetBlock(historyLasthash)
+		if err != nil {
+			log.Panic("SendVersionStartConflict error",err)
+		}
 	}
 	bestHeight := historyLastblock.Height
 	lasthash := hex.EncodeToString(historyLasthash)
@@ -539,7 +545,7 @@ func handleGetData(p *Peer,command Command, bc *core.Blockchain) {
 	}
 
 	if payload.Type == "block" {
-		block, err := bc.GetBlock([]byte(payload.ID))
+		block, err := bc.GetBlock(payload.ID)
 		if err != nil {
 			return
 		}
@@ -1111,7 +1117,7 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 
 	// Dequeue history versiondata and sent version to the peer
 	if size,err1 := versionPQueue.Size(1);err1 == nil && size >0 {
-		var found common.Hash
+		var found *common.Hash
 		var hashs2del = make(map[string]common.Hash,1)
 		var j = 0
 	outer:for size,err1 := versionPQueue.Size(1);err1 == nil && size > 0 && j<10;{
@@ -1123,12 +1129,12 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 				break
 			}
 			myLastHash := versionMsg.Bytes()
+			blockHashs := bc.GetBlockHashesMap(myLastHash)
 			var hash common.Hash
-			for _,hash = range payload.BlocksHash {
-					//delete old conflict block
-				blockHashs := bc.GetBlockHashesMap(myLastHash)
-				for hashstr,blockhash := range blockHashs {
-					found = blockhash
+			for hashstr,blockhash := range blockHashs {
+				//delete old conflict block
+				found = &blockhash
+				for _,hash = range payload.BlocksHash {
 					if(hashstr != hash.String()){
 						hashs2del[hashstr] = blockhash
 					}else{
@@ -1138,27 +1144,30 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 			}
 			j = j + 1
 		}
-		if(len(hashs2del) > 0 ){
-			blockDeleted := bc.DelBlockHashes(hashs2del)
-			if (len(blockDeleted) == 0) {
-				log.Println("no blocks deleted !")
-			}
+		blockDeleted := bc.DelBlockHashes(hashs2del)
+		if (len(blockDeleted) == 0) {
+			log.Println("no blocks deleted !")
 		}
-		SendVersionStartConflict(p.Rw, found.Bytes(), bc)
+		if found == nil {
+			log.Println("no blocks found !")
+			SendVersionStartConflict(p.Rw, nil, bc)
+		}else{
+			SendVersionStartConflict(p.Rw, found.Bytes(), bc)
+		}
 	}else {
 		bestHeight, lastHash := bc.GetBestHeightLastHash()
 		log.Printf("invalide block at height %d ", bestHeight)
 		if err != nil {
 			log.Panic(err)
 		}
-		var found common.Hash
+		var found *common.Hash
 		var hashs2del= make(map[string]common.Hash, 1)
 		var hash0= common.Hash{}
 		var j = 0
 		outer1:for ; lastHash.String() != hash0.String() && j < 10; {
 			var hash common.Hash
+			found = &lastHash
 			for _,hash = range payload.BlocksHash {
-				found = lastHash
 				if hash.String() == lastHash.String() {
 					break outer1
 				}else{
@@ -1173,10 +1182,15 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 			j = j + 1
 		}
 		blocksDeleted := bc.DelBlockHashes(hashs2del)
-		if (len(blocksDeleted) == 0) {
+		if  len(blocksDeleted) == 0 {
 			log.Println("no blocks deleted !")
 		}
-		SendVersionStartConflict(p.Rw, found.Bytes(), bc)
+		if found == nil {
+			log.Println("no blocks found !")
+			SendVersionStartConflict(p.Rw, nil, bc)
+		}else{
+			SendVersionStartConflict(p.Rw, found.Bytes(), bc)
+		}
 	}
 }
 
