@@ -596,7 +596,7 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 		log.Fatal("error",core.ErrInvalidSender)
 	}
 	var nonce = pendingState.GetNonce(from)
-	if nonce < tx.Data.AccountNonce {
+	if nonce < tx.Nonce() {
 		pendingState.SetNonce(from, tx.Nonce())
 	}
 
@@ -679,11 +679,15 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 
 			var pendingState = Manager.txPool.State()
 			fmt.Println("==>NewCoinbaseTX ")
-			var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(miningAddress)))
+			//var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(miningAddress)))
+
+			var commonaddr = core.Base58ToCommonAddress([]byte(miningAddress))
+			var nonce,_ = pendingState.StateDB.GetTransactionNonce(commonaddr.String())
 			cbTx := core.NewCoinbaseTX(nonce+1,miningAddress, "",bc.NodeId)
+			pendingState.StateDB.PutTransaction(cbTx.ID,cbTx.Serialize(),commonaddr.String())
+			pendingState.SetNonce(commonaddr,nonce+1)
+
 			txs = append(txs, cbTx)
-
-
 			newBlock := bc.MineBlock(txs)
 
 

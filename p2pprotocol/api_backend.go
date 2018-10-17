@@ -188,7 +188,6 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 		Manager.TxMempool[hex.EncodeToString(signedTx.ID)] = signedTx
 
 		//set nonce to statedb
-		//statedb.Finalise(true)
 		var pendingState = Manager.txPool.State()
 		// Make sure the transaction is signed properly
 		from, err := core.Sender(Manager.txPool.Signer, signedTx)
@@ -198,6 +197,7 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 		pendingState.SetNonce(from,signedTx.Nonce())
 		//pendingState.StateDB.Finalise(true)
 		err = b.swc.txPool.AddLocal(signedTx)
+		pendingState.StateDB.PutTransaction(signedTx.ID,signedTx.Serialize(),from.String())
 		fmt.Printf("===AddLocal %s \n", "error",err)
 
 		return nil
@@ -220,8 +220,8 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 	}
 
 	func (b *SwcAPIBackend) GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error) {
-		return b.swc.txPool.State().GetNonce(addr), nil
-		//return core.GetPoolNonce(b.swc.nodeID,addr.String())
+		// b.swc.txPool.State().GetNonce(addr), nil
+		return b.swc.txPool.State().StateDB.GetTransactionNonce(addr.String())
 	}
 
 	func (b *SwcAPIBackend) GetNodeId() string{

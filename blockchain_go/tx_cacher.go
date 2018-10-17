@@ -16,10 +16,7 @@
 
 package core
 
-import (
-	"runtime"
-
-)
+import "runtime"
 
 // senderCacher is a concurrent tranaction sender recoverer anc cacher.
 var senderCacher = newTxSenderCacher(runtime.NumCPU())

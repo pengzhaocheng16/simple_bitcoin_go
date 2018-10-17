@@ -138,9 +138,6 @@ func (uts *WalletTransactions) InitDB(nodeId,address string) error {
 	}
 
 
-	uts.stateObjects =      make(map[common.Address]*stateObject)
-	uts.stateObjectsDirty = make(map[common.Address]struct{})
-
 	return nil
 }
 /*
@@ -198,17 +195,23 @@ func (uts *WalletTransactions) GetTransaction(txID []byte,address string) ([]byt
 
 // Add transaction record
 func (uts *WalletTransactions) PutTransaction(txID []byte, txdata []byte,address string) error {
+	uts.InitDB(uts.NodeId,"")
+	defer uts.DB.Close()
 	return uts.DB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(address+"_"+walletTransactionsBucket))
-		if(b.Get([]byte("counter"))==nil){
+		b,err := tx.CreateBucketIfNotExists([]byte(address+"_"+walletTransactionsBucket))
+		if err!=nil {
+			return err
+		}
+		cb := b.Get([]byte("counter"))
+		if(cb==nil){
 			cb := make([]byte, 8)
 			binary.BigEndian.PutUint64(cb, 0)
 			b.Put([]byte("counter"),cb)
 		}else{
-			cb := b.Get([]byte("counter"))
 			var x uint64
-			x = uint64(binary.BigEndian.Uint64(cb[:]))
+			x = uint64(binary.BigEndian.Uint64(cb))
 			x = x+1
+			cb := make([]byte, 8)
 			binary.BigEndian.PutUint64(cb, x)
 
 			b.Put([]byte("counter"),cb[:])
@@ -235,14 +238,18 @@ func (uts *WalletTransactions) DeleteTransaction(txID []byte,address string) err
 	})
 }
 
-/*
+
 // returns transaction nonce  if it exists
 func (uts *WalletTransactions) GetTransactionNonce(address string) (uint64, error) {
 	var nonce uint64
 
+	uts.InitDB(uts.NodeId,"")
+	defer uts.DB.Close()
 	err := uts.DB.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(address+"_"+walletTransactionsBucket))
-
+		b,err := tx.CreateBucketIfNotExists([]byte(address+"_"+walletTransactionsBucket))
+		if err!=nil {
+			return err
+		}
 		if b == nil {
 			return NewDBIsNotReadyError()
 		}
@@ -264,7 +271,7 @@ func (uts *WalletTransactions) GetTransactionNonce(address string) (uint64, erro
 		return 0, err
 	}
 	return nonce, nil
-}*/
+}
 
 func (uts *WalletTransactions) TryGet(address []byte) ([]byte, error) {
 	var cb []byte
@@ -389,6 +396,7 @@ func (self *WalletTransactions) setError(err error) {
 func (self *WalletTransactions) GetNonce(addr common.Address) uint64 {
 	stateObject := self.getStateObject(addr)
 	if stateObject != nil {
+		//return stateObject.Nonce()
 		return stateObject.Nonce()
 	}
 
@@ -523,14 +531,37 @@ func (self *WalletTransactions) getStateObject(addr common.Address) (stateObject
 		return obj
 	}
 
+	self.InitDB(self.NodeId,"")
+	defer self.DB.Close()
+	var cb []byte
+	err := self.DB.Update(func(tx *bolt.Tx) error {
+		b,err := tx.CreateBucketIfNotExists([]byte(state+"_"+crypto.Keccak256Hash(addr[:]).String()))
+
+		if err!=nil{
+			return err
+		}
+		if b == nil {
+			return NewDBIsNotReadyError()
+		}
+
+		cb = b.Get(addr[:])
+
+
+		return nil
+	})
+	if err != nil {
+		return nil
+	}
 	// Load the object from the database.
 	//enc, err := self.trie.TryGet(addr[:])
-	enc1, err := self.TryGet(addr[:])
-	if err !=nil {
+	//var enc1, err = self.TryGet(addr[:])
+	var enc1 = cb
+	if enc1 == nil || err !=nil {
+		fmt.Println("enc0-", enc1)
 		self.setError(err)
 		return nil
 	}
-	fmt.Println("enc-", enc1)
+	fmt.Println("enc2-", enc1)
 	if len(enc1) == 0 {
 		self.setError(err)
 		return nil
