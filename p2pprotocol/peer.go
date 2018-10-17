@@ -123,6 +123,7 @@ type statusData struct {
 	TD              *big.Int
 	CurrentBlock    common.Hash
 	GenesisBlock    common.Hash
+	BlocksHash      []common.Hash
 }
 
 type txsync struct {

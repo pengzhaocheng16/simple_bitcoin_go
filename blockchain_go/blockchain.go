@@ -380,9 +380,10 @@ func (bc *Blockchain) GetBlockHashes(lastHash string) [][]byte {
 			stopBlock = true
 			continue
 		}
-		fmt.Printf("--------->GetBlockHashes 3 stopBlock %s\n", stopBlock)
 		if(!stopBlock){
 			blocks = append(blocks, block.Hash.Bytes())
+		}else{
+			break
 		}
 	}
 	fmt.Printf("prepare blocks with %d \n", len(blocks))
@@ -390,16 +391,42 @@ func (bc *Blockchain) GetBlockHashes(lastHash string) [][]byte {
 	return blocks
 }
 
+
+// GetBlockHashes returns a list of hashes of num last blocks in the chain
+func (bc *Blockchain) GetBlockHashesOf(num int) []common.Hash {
+	var blocks []common.Hash
+	var i int = 0
+	bci := bc.Iterator()
+
+	for {
+		block := bci.Next()
+		fmt.Printf("--------->GetBlockHashes 1 bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes()) %s\n", bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes()))
+		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes())  {
+			break
+		}
+		fmt.Printf("--------->GetBlockHashes 2 lastHash %d \n", i)
+		if(i != 10) {
+			blocks = append(blocks, block.Hash)
+		}else{
+			break
+		}
+		i = i+1
+	}
+	fmt.Printf("prepare blocks with %d \n", len(blocks))
+
+	return blocks
+}
+
 // GetBlockHashes returns a list of hashes of all the blocks after a block in the chain
-func (bc *Blockchain) GetBlockHashesMap(lastHash []byte) map[string][]byte {
-	var blocks = make(map[string][]byte)
+func (bc *Blockchain) GetBlockHashesMap(lastHash []byte) map[string]common.Hash {
+	var blocks = make(map[string]common.Hash)
 	bci := bc.Iterator()
 
 	stopBlock := false
 	for {
 		block := bci.Next()
 		fmt.Printf("--------->GetBlockHashes 1 bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes()) %s\n", bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes()))
-		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes())  {
+		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes()) {
 			break
 		}
 		fmt.Printf("--------->GetBlockHashes 2 lastHash %x\n", lastHash)
@@ -407,10 +434,12 @@ func (bc *Blockchain) GetBlockHashesMap(lastHash []byte) map[string][]byte {
 			stopBlock = true
 			continue
 		}
-		hashstr := hex.EncodeToString(block.Hash.Bytes())
+		hashstr := block.Hash.String()
 		fmt.Printf("--------->GetBlockHashes 3 stopBlock %s\n", stopBlock)
 		if(!stopBlock){
-			blocks[hashstr] = block.Hash.Bytes()
+			blocks[hashstr] = block.Hash
+		}else{
+			break
 		}
 	}
 	fmt.Printf("prepare blocks with %d \n", len(blocks))
@@ -642,7 +671,7 @@ func calculateHash(block *Block) ([]byte,*ProofOfWork) {
 //}
 
 // Delete Blocks returns a list of hashes of all the blocks after a block in the chain
-func (bc *Blockchain) DelBlockHashes(hashs map[string][]byte) [][]byte {
+func (bc *Blockchain) DelBlockHashes(hashs map[string]common.Hash) [][]byte {
 	var blocks [][]byte
 	bci := bc.Iterator()
 
