@@ -1119,6 +1119,9 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 			if err2 != nil {
 				log.Panic("create Version myLastHash queue error", err)
 			}
+			if(versionMsg == nil){
+				break
+			}
 			myLastHash := versionMsg.Bytes()
 			var hash common.Hash
 			for _,hash = range payload.BlocksHash {
