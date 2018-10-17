@@ -751,7 +751,7 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 
 	p.Td = foreignerBestHeight
 
-	if myBestHeight.Cmp(foreignerBestHeight) <= 0 {
+	if myBestHeight.Cmp(foreignerBestHeight) < 0 {
 		//sendGetBlocks(payload.AddrFrom,myLastHash)
 		if(myBestHeight.Cmp(foreignerBestHeight) < 0){
 			enqueueVersion(myLastHash.Bytes())
@@ -763,7 +763,7 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 				fmt.Println("---Manager.BestTd:", &Manager.BestTd)
 			}
 		}()
-	} else if myBestHeight.Cmp(foreignerBestHeight) > 0 {
+	} else if myBestHeight.Cmp(foreignerBestHeight) >= 0 {
 		//sendVersion(payload.AddrFrom, bc)
 		//SendVersion(p.Rw, bc)
 
