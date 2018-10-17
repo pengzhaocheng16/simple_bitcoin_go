@@ -298,7 +298,11 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 	var coinbaseNumber = uint64(0)
 	var coinbaseReward = uint64(0)
 	var result = false;
-	//defer txPQueue.Close()
+	queueFile := GenWalletStateDbName(u.Blockchain.NodeId)
+	txPQueue, errcq := NewPQueue(queueFile)
+	if errcq != nil{
+		log.Panic(errcq)
+	}
 
 	for k, tx := range block.Transactions {
 
@@ -317,19 +321,19 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 					return false,8;
 				}
 			}
-			//txPQueue.Close()
+			txPQueue.Close()
 			fmt.Println("--bf IsUTXOAmountValid  \n")
 			result = VerifyTx(*tx,u.Blockchain)
 			if(!result){
 				return result,9
 			}
-			result = u.IsUTXOAmountValid(tx,txPQueue)
+			result = u.IsUTXOAmountValid(tx,nil)
 			//result = u.IsUTXOAmountValid(tx,nil)
 			fmt.Printf("--af IsUTXOAmountValid  result %s \n",result)
 			queueFile := GenWalletStateDbName(u.Blockchain.NodeId)
 			var errcq error
 			txPQueue, errcq = NewPQueue(queueFile)
-			defer txPQueue.Close()
+			//defer txPQueue.Close()
 			if errcq != nil {
 				log.Panic("create queue error", errcq)
 			}
@@ -350,6 +354,7 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 					txPQueue.SetMsg(4,Vin.Txid,Vin.Txid)
 				}
 			}
+			txPQueue.Close()
 		}else{
 			coinbaseNumber = coinbaseNumber +1
 			coinbaseReward = tx.Vout[0].Value

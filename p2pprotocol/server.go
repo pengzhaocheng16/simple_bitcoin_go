@@ -1118,7 +1118,7 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 	// Dequeue history versiondata and sent version to the peer
 	if size,err1 := versionPQueue.Size(1);err1 == nil && size >0 {
 		var found *common.Hash
-		var hashs2del = make(map[string]common.Hash,1)
+		var hashs2del = make(map[string]common.Hash)
 		var j = 0
 	outer:for size,err1 := versionPQueue.Size(1);err1 == nil && size > 0 && j<10;{
 			versionMsg, err2 := versionPQueue.Dequeue()
@@ -1161,7 +1161,7 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 			log.Panic(err)
 		}
 		var found *common.Hash
-		var hashs2del= make(map[string]common.Hash, 1)
+		var hashs2del= make(map[string]common.Hash)
 		var hash0= common.Hash{}
 		var j = 0
 		outer1:for ; lastHash.String() != hash0.String() && j < 10; {

@@ -14,8 +14,6 @@ import (
 	"crypto/sha256"
 	"github.com/ethereum/go-ethereum/common"
 	"../blockchain_go/rawdb"
-	."../boltqueue"
-	."./state"
 	/*"time"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/common/mclock"
@@ -23,8 +21,9 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"*/
 	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/core/types"
 	"./state"
+	"../boltqueue"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const dbFile = "blockchain_%s.db"
@@ -62,7 +61,7 @@ func genBlockChainDbName(nodeID string)string{
 func CreateBlockchain(address, nodeID string) *Blockchain {
 	dbFile := genBlockChainDbName(nodeID)
 	fmt.Printf("Blockchain file %s\n",dbFile)
-	if DbExists(dbFile) {
+	if state.DbExists(dbFile) {
 		fmt.Println("Blockchain already exists.")
 		os.Exit(1)
 	}
@@ -133,7 +132,7 @@ func CreateBlockchain(address, nodeID string) *Blockchain {
 func NewBlockchain(nodeID string) *Blockchain {
 	var dbFile = genBlockChainDbName(nodeID)
 	fmt.Printf("Blockchain file %s\n",dbFile)
-	if DbExists(dbFile) == false {
+	if state.DbExists(dbFile) == false {
 		fmt.Println("No existing blockchain found. Create one first.")
 		os.Exit(1)
 	}
@@ -596,18 +595,19 @@ func (bc *Blockchain)IsBlockValid(newBlock *Block) (bool,int) {
 
 	//transaction consistent validate
 	UTXOSet := UTXOSet{bc}
-	queueFile := GenWalletStateDbName(bc.NodeId)
-	txPQueue, errcq := NewPQueue(queueFile)
-	if errcq != nil {
-		log.Panic("create queue error", errcq)
-	}
-	defer txPQueue.Close()
-	valid,reason := UTXOSet.VerifyTxTimeLineAndUTXOAmount(oldBlock.Timestamp,newBlock,txPQueue)
+
+	valid,reason := UTXOSet.VerifyTxTimeLineAndUTXOAmount(oldBlock.Timestamp,newBlock,nil)
 	log.Printf("--af  VerifyTxTimeLineAndUTXOAmount valid: %s \n",valid)
+
 	if(!valid){
 		//reason = 6
 		return false,reason
 	}else{
+		queueFile := state.GenWalletStateDbName(bc.NodeId)
+		txPQueue, errcq := boltqueue.NewPQueue(queueFile)
+		if errcq != nil {
+			log.Panic("create queue error", errcq)
+		}
 		//delete outdated vin txid in database
 		for _,tx1 := range newBlock.Transactions{
 			for _,in := range tx1.Vin{
@@ -615,6 +615,7 @@ func (bc *Blockchain)IsBlockValid(newBlock *Block) (bool,int) {
 				txPQueue.DeleteMsg(4,in.Txid)
 			}
 		}
+		txPQueue.Close()
 	}
 	//txPQueue.Close()
 	for _,tx := range newBlock.Transactions{
