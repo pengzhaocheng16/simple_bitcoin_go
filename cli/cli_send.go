@@ -49,12 +49,7 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 	tx := core.NewUTXOTransaction(nonce+1,&wallet, to, big.NewInt(int64(amount)),[]byte{}, &UTXOSet,nodeID)
 
 	if mineNow {
-		block := bc.CurrentBlock()
-		statedb, err := bc.StateAt(block.Root())
-		if(err !=nil){
-			log.Panic(err)
-		}
-		var pendingState = state.ManageState(statedb)
+
 		fmt.Println("==>NewCoinbaseTX ")
 		var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(from)))
 
@@ -134,13 +129,6 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 			UTXOSet := core.UTXOSet{bc}
 			log.Println("--send to",toaddress)
 
-			block := bc.CurrentBlock()
-			statedb, err := bc.StateAt(block.Root())
-			if(err !=nil){
-				log.Panic(err)
-			}
-			var pendingState = state.ManageState(statedb)
-			var addr = wallet.ToCommonAddress()
 			var nonce = pendingState.GetNonce(addr)
 			statedb.SetNonce(addr,nonce+1)
 			statedb.Finalise(true)
