@@ -121,7 +121,8 @@ type statusData struct {
 	ProtocolVersion uint32
 	NetworkId       string
 	TD              *big.Int
-	CurrentBlock    common.Hash
+	CurrentBlockHash    common.Hash
+	CurrentBlock 	*core.Block
 	GenesisBlock    common.Hash
 	BlocksHash      []common.Hash
 }

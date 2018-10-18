@@ -28,6 +28,7 @@ import (
 	"../blockchain_go/rawdb"
 	"../p2p/nat"
 	"../blockchain_go/state"
+	"strconv"
 )
 
 const protocol = "tcp"
@@ -39,7 +40,7 @@ const txsyncPackSize = 100 * 1024
 
 var nodeAddress string
 var miningAddress string
-var BootNodes = []string{"119.27.191.247:2000"}
+var BootNodes = []string{"localhost:2000","119.27.191.247:2000"}
 var BootPeers = []*discover.Node{}
 var CurrentNodeInfo *p2p.NodeInfo
 var blocksInTransit = [][]byte{}
@@ -94,6 +95,9 @@ type verzion struct {
 	BestHeight *big.Int
 	LastHash string
 	AddrFrom   string
+	Block2Del map[string] common.Hash
+	LastBlock  *core.Block
+	RemoteBlockHash *common.Hash
 }
 
 type Command struct {
@@ -294,7 +298,7 @@ func SendTx(p *Peer,addr p2p.MsgWriter, tnx *core.Transaction) {
 
 func SendVersion(addr p2p.MsgWriter, bc *core.Blockchain) {
 	bestHeight,lastHash := bc.GetBestHeight()
-	payload := gobEncode(verzion{nodeVersion, bestHeight,lastHash, nodeAddress})
+	payload := gobEncode(verzion{nodeVersion, bestHeight,lastHash, nodeAddress,nil,nil,nil})
 	//request := append(commandToBytes("version"), payload...)
 
 	Manager.BigestTd = bestHeight
@@ -308,20 +312,14 @@ func SendVersion(addr p2p.MsgWriter, bc *core.Blockchain) {
 	sendDataC(addr, command)
 }
 
-func SendVersionStartConflict(addr p2p.MsgWriter, historyLasthash []byte, bc *core.Blockchain) {
-	var historyLastblock core.Block
-	if historyLasthash == nil {
-		historyLastblock = *bc.GetBlockByNumber(0)
-	}else{
-		var err error
-		historyLastblock,err = bc.GetBlock(historyLasthash)
-		if err != nil {
-			log.Panic("SendVersionStartConflict error",err)
-		}
+func sendVersionStartConflict(addr p2p.MsgWriter, historyLastblock *core.Block, bc *core.Blockchain,blocktodel map[string]common.Hash,remoteBlockHash *common.Hash) {
+	if historyLastblock == nil {
+		var block = bc.GetLastBlock()
+		historyLastblock = &block
 	}
 	bestHeight := historyLastblock.Height
-	lasthash := hex.EncodeToString(historyLasthash)
-	version := verzion{nodeVersion, bestHeight,lasthash, nodeAddress}
+	lasthash := hex.EncodeToString(historyLastblock.Hash.Bytes())
+	version := verzion{nodeVersion, bestHeight,lasthash, nodeAddress,blocktodel,historyLastblock,remoteBlockHash}
 	payload := gobEncode(version)
 	//request := append(commandToBytes("version"), payload...)
 
@@ -759,7 +757,7 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 
 	if myBestHeight.Cmp(foreignerBestHeight) < 0 {
 		//sendGetBlocks(payload.AddrFrom,myLastHash)
-		if(myBestHeight.Cmp(foreignerBestHeight) < 0){
+		if(myBestHeight.Cmp(foreignerBestHeight) < 0 ){
 			enqueueVersion(myLastHash.Bytes())
 			sendGetBlocks(p.Rw,myLastHashStr)
 		}
@@ -772,7 +770,27 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 	} else if myBestHeight.Cmp(foreignerBestHeight) >= 0 {
 		//sendVersion(payload.AddrFrom, bc)
 		//SendVersion(p.Rw, bc)
-
+		if(payload.LastBlock != nil && &payload.LastBlock.PrevBlockHash !=nil ){
+			result,reason := bc.IsBlockValidPreHash(payload.LastBlock,&payload.LastBlock.PrevBlockHash)
+			if result {
+				preblock,err := bc.GetBlock(payload.RemoteBlockHash.Bytes())
+				if(err != nil){
+					log.Panic(err)
+				}
+				if(payload.LastBlock.Timestamp.Cmp(preblock.Timestamp) < 0 ){
+					var Blocks = bc.GetBlockHashesMap(payload.LastBlock.PrevBlockHash.Bytes())
+					deletedblocks := bc.DelBlockHashes(Blocks)
+					log.Println("deletedblocks len :",len(deletedblocks))
+					utxo := core.UTXOSet{bc}
+					utxo.Recover(deletedblocks)
+					SendVersion(p.Rw,bc)
+				}else{
+					sendVersionStartConflict(p.Rw, &preblock, bc,nil,&payload.LastBlock.Hash)
+				}
+			}else{
+				log.Println("block not valid reason :",reason)
+			}
+		}else{
 		//check possible conflict fork
 		//if there is conflict send  conflict msg to the node and ignore this node
 		peerLastHash,err1 := hex.DecodeString(payload.LastHash)
@@ -781,19 +799,35 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 		}
 		_,err2 := bc.GetBlock(peerLastHash)
 		if(err2 != nil){
+			blockLastTime := payload.RemoteBlockHash
 			log.Println("error:conflict ",err2)
-			blockshash := bc.GetBlockHashesOf(10)
+			var blockshash []common.Hash
+			if(blockLastTime!=nil){
+				blockshash = bc.GetBlockHashesOfLastTime(10,blockLastTime)
+			}else{
+				blockshash = bc.GetBlockHashesOf(10)
+			}
+			var block core.Block
+			var err error
+			if(myBestHeight.Cmp(foreignerBestHeight) == 0){
+				block,err = bc.GetBlock(myLastHash.Bytes())
+				if(err != nil) {
+					log.Println("error:conflict ", err2)
+				}
+			}
 			data := statusData{
 				uint32(1),
 				CurrentNodeInfo.ID,
 				myBestHeight,
 				myLastHash,
+				&block,
 				bc.GenesisHash,
 				blockshash,//up to 10 blocks hash potential confilict block start at
 			}
 			payload := gobEncode(data)
 			p2p.Send(p.Rw, StatusMsg, &Command{"conflict",payload})
 			return
+		}
 		}
 		go func(){
 		select {
@@ -916,15 +950,31 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 		nodeIDs := dotray.QueryNodes(10)
 		fmt.Println("query nodes:", nodeIDs)
 	*/
-	 wallets, err := core.NewWallets("119.27.191.247:2000")
+	 wallets, err := core.NewWallets(BootNodes[0])
 	 if err != nil {
 		 log.Panic(err)
 	 }
 	 walletaddrs := wallets.GetAddresses()
 	 wallet := wallets.GetWallet(walletaddrs[0])
 	 var peers []*discover.Node
-	 if(nodeID!="119.27.191.247:2000"){
-	 	peers = []*discover.Node{&discover.Node{IP: net.ParseIP("119.27.191.247"),TCP:2000,UDP:2000,ID: discover.PubkeyID(&wallet.PrivateKey.PublicKey)}}
+	 var hosts = strings.Split(BootNodes[0],":")
+	 var ip string
+	 var porti uint16
+	 if len(hosts) == 2 {
+		 ip = hosts[0]
+		 ip = strings.Replace(ip,"localhost","127.0.0.1" ,-1)
+		 var ports int64
+		 ports,err=strconv.ParseInt(hosts[1], 10, 16)
+		 if(err !=nil ){
+			 log.Panic("BootNodes illegal port illegal")
+		 }
+		 porti = uint16(ports)
+	 }else{
+	 	log.Panic("BootNodes illegal")
+	 }
+	 log.Printf("BootNodes illegal %s ",net.ParseIP(ip))
+	 if(nodeID!=BootNodes[0]){
+	 	peers = []*discover.Node{&discover.Node{IP: net.ParseIP(ip),TCP:porti,UDP:porti,ID: discover.PubkeyID(&wallet.PrivateKey.PublicKey)}}
 	 }else{
 	 	peers = nil
 	 }
@@ -1105,18 +1155,19 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 		log.Panic(err)
 	}
 
+	log.Println(" prepared hashs len(payload.BlocksHash) ",len(payload.BlocksHash))
 	//save every version command received in queue
-	queueFile := fmt.Sprintf("version_%s.db", node_id)
+	/*queueFile := fmt.Sprintf("version_%s.db", node_id)
 	versionPQueue, err := NewPQueue(queueFile)
 	if err != nil {
 		log.Panic("create Version Command queue error",err)
 	}
 
-	defer versionPQueue.Close()
+	defer versionPQueue.Close()*/
 	//defer os.Remove(queueFile)
 
 	// Dequeue history versiondata and sent version to the peer
-	if size,err1 := versionPQueue.Size(1);err1 == nil && size >0 {
+	/*if size,err1 := versionPQueue.Size(1);err1 == nil && size >0 {
 		var found *common.Hash
 		var hashs2del = make(map[string]common.Hash)
 		var j = 0
@@ -1154,44 +1205,85 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 		}else{
 			SendVersionStartConflict(p.Rw, found.Bytes(), bc)
 		}
-	}else {
-		bestHeight, lastHash := bc.GetBestHeightLastHash()
-		log.Printf("invalide block at height %d ", bestHeight)
-		if err != nil {
-			log.Panic(err)
+	}else */{
+		    lastblock := bc.GetLastBlock()
+			lastHash := lastblock.Hash
+		if(payload.CurrentBlock !=nil && payload.TD.Cmp(lastblock.Height) == 0&&
+			&lastblock != nil&& &lastblock.PrevBlockHash!=nil){
+			var needSyncBlock bool = false
+			valid,reason := bc.IsBlockValidPreHash(payload.CurrentBlock,&lastblock.PrevBlockHash)
+			if( valid ){
+				if(payload.CurrentBlock.Timestamp.Cmp(lastblock.Timestamp) < 0){
+					needSyncBlock = true
+				}
+			}else{
+				getStartAndSendVersion(bc,lastHash,payload,p)
+				log.Printf("in conflict invalide block reason %d ", reason)
+			}
+			if( needSyncBlock ){
+				var hashs2del= make(map[string]common.Hash)
+				hashs2del[lastHash.String()] = lastHash
+				var blocksDeleted = bc.DelBlockHashes(hashs2del)
+				utxo := core.UTXOSet{bc}
+				utxo.Recover(blocksDeleted)
+				if len(blocksDeleted) == 0 {
+					log.Println("no blocks deleted !")
+				}
+				SendVersion(p.Rw,bc)
+			}else{
+				sendVersionStartConflict(p.Rw,&lastblock , bc,nil,&payload.CurrentBlock.Hash)
+			}
+		}else{
+				getStartAndSendVersion(bc,lastHash,payload,p)
+			}
 		}
+	//}
+}
+
+func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload statusData,p *Peer){
 		var found *common.Hash
-		var hashs2del= make(map[string]common.Hash)
-		var hash0= common.Hash{}
-		var j = 0
-		outer1:for ; lastHash.String() != hash0.String() && j < 10; {
+		var hashs2del = make(map[string]common.Hash)
+		var hash0 = common.Hash{}
+		var conflictBlock core.Block
+		var remoteblockhash *common.Hash
+		var err1 error
+		//var j = 0
+	outer1:for ; lastHash.String() != hash0.String() /*&& j <10*/; {
 			var hash common.Hash
 			found = &lastHash
 			for _,hash = range payload.BlocksHash {
+				log.Println("hash.String() ",hash.String())
+				log.Println("lastHash.String() ",lastHash.String())
 				if hash.String() == lastHash.String() {
+					//delete(hashs2del, lastHash.String())
 					break outer1
 				}else{
 					hashs2del[lastHash.String()] = lastHash
 				}
+				remoteblockhash = &hash
 			}
-			var block, err1 = bc.GetBlock(lastHash.Bytes())
+		    conflictBlock, err1 = bc.GetBlock(lastHash.Bytes())
 			if err1 != nil {
 				log.Panic(err1)
 			}
-			lastHash = block.PrevBlockHash
-			j = j + 1
+			lastHash = conflictBlock.PrevBlockHash
+			//j = j + 1
 		}
-		blocksDeleted := bc.DelBlockHashes(hashs2del)
-		if  len(blocksDeleted) == 0 {
-			log.Println("no blocks deleted !")
-		}
+	    log.Println("delete blocks len(hashs2del) !",len(hashs2del))
+	/*blocksDeleted := bc.DelBlockHashes(hashs2del)
+	if  len(blocksDeleted) == 0 {
+		log.Println("no blocks deleted !")
+	}else{
+		utxo := core.UTXOSet{bc}
+		utxo.Recover(blocksDeleted)
+	}*/
 		if found == nil {
 			log.Println("no blocks found !")
-			SendVersionStartConflict(p.Rw, nil, bc)
+			sendVersionStartConflict(p.Rw, nil, bc,nil,remoteblockhash)
 		}else{
-			SendVersionStartConflict(p.Rw, found.Bytes(), bc)
+			log.Println(" conflict block found ! ",found.String())
+			sendVersionStartConflict(p.Rw, &conflictBlock, bc,nil,remoteblockhash)
 		}
-	}
 }
 
 func enqueueVersion(myLastHash []byte){

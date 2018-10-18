@@ -195,6 +195,8 @@ func (bc *Blockchain) AddBlock(block *Block) {
 				return err
 			}
 			bc.tip = block.Hash
+		}else{
+			log.Panic("block not valid!")
 		}
 
 		return nil
@@ -227,8 +229,9 @@ func (bc *Blockchain) FindTransaction(ID []byte) (Transaction, error) {
 }
 
 // FindUTXO finds all unspent transaction outputs and returns transactions with spent outputs removed
-func (bc *Blockchain) FindUTXO() map[string]TXOutputs {
+func (bc *Blockchain) FindUTXO() (map[string]TXOutputs,map [string]common.Hash) {
 	UTXO := make(map[string]TXOutputs)
+	UTXOBlock := make(map[string]common.Hash)
 	//TODO put spentTXOs in bucket
 	spentTXOs := make(map[string][]int)
 	bci := bc.Iterator()
@@ -265,6 +268,7 @@ func (bc *Blockchain) FindUTXO() map[string]TXOutputs {
 					spentTXOs[inTxID] = append(spentTXOs[inTxID], int(in.Vout.Int64()))
 				}
 			}
+			UTXOBlock[txID] = block.Hash
 		}
 
 		//fmt.Println("block.PrevBlockHash.Bytes() ",block.PrevBlockHash.Bytes())
@@ -273,7 +277,7 @@ func (bc *Blockchain) FindUTXO() map[string]TXOutputs {
 		}
 	}
 
-	return UTXO
+	return UTXO,UTXOBlock
 }
 
 // Iterator returns a BlockchainIterat
@@ -283,9 +287,7 @@ func (bc *Blockchain) Iterator() *BlockchainIterator {
 
 	return bci
 }
-
-// GetBestHeight returns the height of the latest block and last block hash
-func (bc *Blockchain) GetBestHeightLastHash() (*big.Int,common.Hash) {
+func (bc *Blockchain) GetLastBlock() Block{
 	var lastBlock Block
 
 	err := bc.Db.View(func(tx *bolt.Tx) error {
@@ -301,6 +303,12 @@ func (bc *Blockchain) GetBestHeightLastHash() (*big.Int,common.Hash) {
 	if err != nil {
 		log.Panic(err)
 	}
+	return lastBlock
+}
+// GetBestHeight returns the height of the latest block and last block hash
+func (bc *Blockchain) GetBestHeightLastHash() (*big.Int,common.Hash) {
+	var lastBlock Block
+	lastBlock = bc.GetLastBlock()
 
 	return lastBlock.Height,lastBlock.Hash
 }
@@ -312,6 +320,7 @@ func (bc *Blockchain) GetBestHeight() (*big.Int,string) {
 }
 
 // GetBlock finds a block by its hash and returns it
+// blockHash: common hash bytes
 func (bc *Blockchain) GetBlock(blockHash []byte) (Block, error) {
 	var block Block
 
@@ -362,7 +371,7 @@ func (bc *Blockchain) GetBlockByHashNumber(blockHash []byte,number uint64) (*Blo
 	return &block, nil
 }
 
-// GetBlockHashes returns a list of hashes of all the blocks after a block in the chain
+// GetBlockHashes returns a list of hashes of all the blocks after a block(not include) in the chain
 func (bc *Blockchain) GetBlockHashes(lastHash string) [][]byte {
 	var blocks [][]byte
 	bci := bc.Iterator()
@@ -391,9 +400,8 @@ func (bc *Blockchain) GetBlockHashes(lastHash string) [][]byte {
 	return blocks
 }
 
-
 // GetBlockHashes returns a list of hashes of num last blocks in the chain
-func (bc *Blockchain) GetBlockHashesOf(num int) []common.Hash {
+func (bc *Blockchain) GetBlockHashesOfLastTime(num int,lasthash *common.Hash) []common.Hash {
 	var blocks []common.Hash
 	var i int = 0
 	bci := bc.Iterator()
@@ -405,6 +413,9 @@ func (bc *Blockchain) GetBlockHashesOf(num int) []common.Hash {
 			break
 		}
 		fmt.Printf("--------->GetBlockHashes 2 lastHash %d \n", i)
+		if lasthash!=nil && !bytes.Equal(block.PrevBlockHash.Bytes(),lasthash.Bytes()){
+			continue
+		}
 		if(i != 10) {
 			blocks = append(blocks, block.Hash)
 		}else{
@@ -415,6 +426,11 @@ func (bc *Blockchain) GetBlockHashesOf(num int) []common.Hash {
 	fmt.Printf("prepare blocks with %d \n", len(blocks))
 
 	return blocks
+}
+
+// GetBlockHashes returns a list of hashes of num last blocks in the chain
+func (bc *Blockchain) GetBlockHashesOf(num int) []common.Hash {
+	return bc.GetBlockHashesOfLastTime(num,nil)
 }
 
 // GetBlockHashes returns a list of hashes of all the blocks after a block in the chain
@@ -530,37 +546,55 @@ func (bc *Blockchain) VerifyTransaction(tx *Transaction) bool {
 
 }
 
-
 // make sure block is valid by checking height, and comparing the hash of the previous block
 // ,and block hash,and block pow result,and transaction consistent(time line,utxo,tx address,coinbasetx)
 func (bc *Blockchain)IsBlockValid(newBlock *Block) (bool,int) {
+		return bc.IsBlockValidPreHash(newBlock,nil)
+}
+
+// make sure block is valid by checking height, and comparing the hash of the previous block
+// ,and block hash,and block pow result,and transaction consistent(time line,utxo,tx address,coinbasetx)
+func (bc *Blockchain)IsBlockValidPreHash(newBlock *Block,preHash *common.Hash) (bool,int) {
 	var oldBlock *Block
 	var lastHashS string
 	var reason = 0
-	err := bc.Db.View(func(tx *bolt.Tx) (error) {
-		b := tx.Bucket([]byte(blocksBucket))
-		blockInDb := b.Get(newBlock.Hash.Bytes())
-
-		if blockInDb != nil {
+	if(preHash != nil){
+		lastHashS = preHash.String()
+		err := bc.Db.View(func(tx *bolt.Tx) (error) {
+			b := tx.Bucket([]byte(blocksBucket))
+			lastBlockData := b.Get(preHash.Bytes())
+			oldBlock = DeserializeBlock(lastBlockData)
 			return nil
+		})
+		if err != nil {
+			log.Panic(err)
 		}
+	}else{
+		err := bc.Db.View(func(tx *bolt.Tx) (error) {
+			b := tx.Bucket([]byte(blocksBucket))
+			blockInDb := b.Get(newBlock.Hash.Bytes())
 
-		lastHash := b.Get([]byte("l"))
-		lastHashS = hex.EncodeToString(lastHash[:])
-		fmt.Printf("lastHash %x \n", lastHashS)
-		lastBlockData := b.Get(lastHash)
-		oldBlock = DeserializeBlock(lastBlockData)
+			if blockInDb != nil {
+				return nil
+			}
 
-		return nil
-	})
+			lastHash := b.Get([]byte("l"))
+			lastHashS = common.BytesToHash(lastHash[:]).String()
+			fmt.Printf("lastHash %x \n", lastHashS)
+			lastBlockData := b.Get(lastHash)
+			oldBlock = DeserializeBlock(lastBlockData)
 
-	if err != nil {
-		log.Panic(err)
+			return nil
+		})
+		if err != nil {
+			log.Panic(err)
+		}
 	}
 	if(oldBlock==nil){
 		fmt.Printf("newBlock.Hash:%x",newBlock.Hash)
-		log.Panic("ERROR:last block inconsistent with new block!lastHashS:"+lastHashS)
+		log.Println("ERROR:last block inconsistent with new block!lastHashS:"+lastHashS)
 		reason = 1
+		return false,reason
 	}
 	//fmt.Printf("oldBlock.Height %n \n", oldBlock.Height)
 	//fmt.Printf("newBlock.Height %n \n", newBlock.Height)
@@ -570,7 +604,7 @@ func (bc *Blockchain)IsBlockValid(newBlock *Block) (bool,int) {
 		return false,reason
 	}
 
-	if lastHashS != hex.EncodeToString(newBlock.PrevBlockHash[:]) {
+	if lastHashS != newBlock.PrevBlockHash.String() {
 		reason = 3
 		return false,reason
 	}
@@ -673,8 +707,8 @@ func calculateHash(block *Block) ([]byte,*ProofOfWork) {
 //}
 
 // Delete Blocks returns a list of hashes of all the blocks after a block in the chain
-func (bc *Blockchain) DelBlockHashes(hashs map[string]common.Hash) [][]byte {
-	var blocks [][]byte
+func (bc *Blockchain) DelBlockHashes(hashs map[string]common.Hash) []*Block {
+	var blocks []*Block
 	if(len(hashs) > 0 ) {
 		bci := bc.Iterator()
 
@@ -683,18 +717,31 @@ func (bc *Blockchain) DelBlockHashes(hashs map[string]common.Hash) [][]byte {
 			if bytes.Equal(block.PrevBlockHash.Bytes(), common.BytesToHash([]byte{}).Bytes()) {
 				break
 			}
-			if _, ok := hashs[hex.EncodeToString(block.Hash.Bytes())]; ok {
+			if _, ok := hashs[block.Hash.String()]; ok {
 				err := bc.Db.Update(func(tx *bolt.Tx) error {
-					b, err := tx.CreateBucket([]byte(blocksBucket))
+					b, err := tx.CreateBucketIfNotExists([]byte(blocksBucket))
 					if err != nil {
 						log.Panic(err)
 					}
-					return b.Delete(block.Hash.Bytes())
+					err = b.Delete(block.Hash.Bytes())
+					if err != nil   {
+						//log.Panic(err)
+						return err
+					}
+					err1 := b.Put([]byte("l"), block.PrevBlockHash.Bytes())
+					if err1 != nil  {
+						//log.Panic(err)
+						return err
+					}
+					return nil
 				})
 				if (err != nil) {
 					log.Panic(err)
 				}
-				blocks = append(blocks, block.Hash.Bytes())
+
+				bc.tip = block.Hash
+
+				blocks = append(blocks, block)
 			}
 
 		}

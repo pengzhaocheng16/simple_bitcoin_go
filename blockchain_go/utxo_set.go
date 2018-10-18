@@ -11,9 +11,11 @@ import (
 	."./state"
 	"math/big"
 	"github.com/ethereum/go-ethereum/common"
+	"bytes"
 )
 
 const utxoBucket = "chainstate"
+const utxoBlockBucket = "chainstate_blockid2tx"
 
 var MineNow_ = false
 
@@ -185,14 +187,23 @@ func (u UTXOSet) CountTransactions() int {
 func (u UTXOSet) Reindex() {
 	db := u.Blockchain.Db
 	bucketName := []byte(utxoBucket)
+	blockBucketName := []byte(utxoBlockBucket)
 
 	err := db.Update(func(tx *bolt.Tx) error {
 		err := tx.DeleteBucket(bucketName)
 		if err != nil && err != bolt.ErrBucketNotFound {
 			log.Panic(err)
 		}
+		err = tx.DeleteBucket(blockBucketName)
+		if err != nil && err != bolt.ErrBucketNotFound {
+			log.Panic(err)
+		}
 
 		_, err = tx.CreateBucket(bucketName)
+		if err != nil {
+			log.Panic(err)
+		}
+		_, err = tx.CreateBucket(blockBucketName)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -203,10 +214,11 @@ func (u UTXOSet) Reindex() {
 		log.Panic(err)
 	}
 
-	UTXO := u.Blockchain.FindUTXO()
+	UTXO,UTXOBlock := u.Blockchain.FindUTXO()
 
 	err = db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketName)
+		blockb := tx.Bucket(blockBucketName)
 
 		for txID, outs := range UTXO {
 			key, err := hex.DecodeString(txID)
@@ -215,6 +227,10 @@ func (u UTXOSet) Reindex() {
 			}
 
 			err = b.Put(key, outs.Serialize())
+			if err != nil {
+				log.Panic(err)
+			}
+			err = blockb.Put(key, UTXOBlock[txID].Bytes())
 			if err != nil {
 				log.Panic(err)
 			}
@@ -232,7 +248,10 @@ func (u UTXOSet) Update(block *Block) {
 	fmt.Printf("--->update utxo \n")
 	err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(utxoBucket))
-
+		blockb,err := tx.CreateBucketIfNotExists([]byte(utxoBlockBucket))
+		if err != nil {
+			log.Panic(err)
+		}
 		for _, tx := range block.Transactions {
 			if tx.IsCoinbase() == false {
 
@@ -255,6 +274,10 @@ func (u UTXOSet) Update(block *Block) {
 					if err != nil {
 						log.Panic(err)
 					}
+					err = blockb.Put(tx.ID, block.Hash.Bytes())
+					if err != nil {
+						log.Panic(err)
+					}
 				}
 			}else{
 
@@ -264,6 +287,11 @@ func (u UTXOSet) Update(block *Block) {
 				}
 
 				err := b.Put(tx.ID, newOutputs.Serialize())
+				if err != nil {
+					log.Panic(err)
+				}
+
+				err = blockb.Put(tx.ID, block.Hash.Bytes())
 				if err != nil {
 					log.Panic(err)
 				}
@@ -284,6 +312,98 @@ func (u UTXOSet) Update(block *Block) {
 			}
 		}
 
+		return nil
+	})
+	if err != nil {
+		log.Panic(err)
+	}
+}
+
+
+// Recover recover the UTXO set with transactions from the Block
+// The Block is considered to be the start conflict block of a blockchain
+func (u UTXOSet) Recover(blocks []*Block) {
+	db := u.Blockchain.Db
+
+	fmt.Printf("--->recover utxo \n")
+	err := db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(utxoBucket))
+		blockb := tx.Bucket([]byte(utxoBlockBucket))
+		var block *Block
+	for _,block = range blocks {
+		for _, tx := range block.Transactions {
+			if tx.IsCoinbase() == false {
+
+				updatedOuts := TXOutputs{}
+
+				outs := tx.Vout
+
+				fmt.Printf("--> len(outs.Outputs) %x \n", len(outs))
+				for outidx, out := range outs {
+					//if outidx != vin.Vout {
+					fmt.Printf("tx.Vout outidx %d \n", outidx)
+					fmt.Printf("tx.Vout Value %d  \n", out.Value)
+					updatedOuts.Outputs = append(updatedOuts.Outputs, out)
+					//}
+				}
+				fmt.Printf("len(updatedOuts.Outputs) %x \n", len(updatedOuts.Outputs))
+
+				if len(updatedOuts.Outputs) != 0 {
+					/*err := b.Put(tx.ID, updatedOuts.Serialize())*/
+					err := b.Delete(tx.ID)
+					if err != nil {
+						log.Panic(err)
+					}
+					err = blockb.Delete(tx.ID)
+					if err != nil {
+						log.Panic(err)
+					}
+				}
+			} else {
+
+				/*newOutputs := TXOutputs{}
+				for _, out := range tx.Vout {
+					newOutputs.Outputs = append(newOutputs.Outputs, out)
+				}*/
+				//err := b.Put(tx.ID, updatedOuts.Serialize())
+				err := b.Delete(tx.ID)
+				if err != nil {
+					log.Panic(err)
+				}
+				err = blockb.Delete(tx.ID)
+				if err != nil {
+					log.Panic(err)
+				}
+			}
+		}
+		//in the case spend tx in block
+		for _, tx := range block.Transactions {
+			if tx.IsCoinbase() == false {
+				fmt.Printf("--》len(tx.Vin) %x \n", len(tx.Vin))
+				for _, vin := range tx.Vin {
+					fmt.Printf("vin.Txid %x \n", vin.Txid)
+					blockhash := blockb.Get(vin.Txid)
+					block,err := u.Blockchain.GetBlock(blockhash)
+					if err != nil {
+						log.Panic(err)
+					}
+					for _,tx := range block.Transactions{
+						if(bytes.Equal(tx.ID,vin.Txid)){
+							newOutputs := TXOutputs{}
+							for _, out := range tx.Vout {
+								newOutputs.Outputs = append(newOutputs.Outputs, out)
+							}
+							b.Put(tx.ID,newOutputs.Serialize())
+						}
+					}
+					/*err := b.Delete(vin.Txid)
+					if err != nil {
+						log.Panic(err)
+					}*/
+				}
+			}
+		}
+	}
 		return nil
 	})
 	if err != nil {
