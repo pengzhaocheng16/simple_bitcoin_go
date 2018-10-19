@@ -799,14 +799,14 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 		}
 		_,err2 := bc.GetBlock(peerLastHash)
 		if(err2 != nil){
-			blockLastTime := payload.RemoteBlockHash
+			//blockLastTime := payload.RemoteBlockHash
 			log.Println("error:conflict ",err2)
 			var blockshash []common.Hash
-			if(blockLastTime!=nil){
-				blockshash = bc.GetBlockHashesOfLastTime(10,blockLastTime)
-			}else{
-				blockshash = bc.GetBlockHashesOf(10)
-			}
+			/*if(blockLastTime!=nil){
+				blockshash = bc.GetBlockHashesOfLastTime(100,blockLastTime)
+			}else{*/
+				blockshash = bc.GetBlockHashesOf(100)
+			//}
 			var block core.Block
 			var err error
 			if(myBestHeight.Cmp(foreignerBestHeight) == 0){
@@ -1247,8 +1247,8 @@ func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload sta
 		var conflictBlock core.Block
 		var remoteblockhash *common.Hash
 		var err1 error
-		//var j = 0
-	outer1:for ; lastHash.String() != hash0.String() /*&& j <10*/; {
+		var j = 0
+	outer1:for ; lastHash.String() != hash0.String() && j <100; {
 			var hash common.Hash
 			found = &lastHash
 			for _,hash = range payload.BlocksHash {
@@ -1267,7 +1267,7 @@ func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload sta
 				log.Panic(err1)
 			}
 			lastHash = conflictBlock.PrevBlockHash
-			//j = j + 1
+			j = j + 1
 		}
 	    log.Println("delete blocks len(hashs2del) !",len(hashs2del))
 	/*blocksDeleted := bc.DelBlockHashes(hashs2del)
@@ -1279,7 +1279,8 @@ func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload sta
 	}*/
 		if found == nil {
 			log.Println("no blocks found !")
-			sendVersionStartConflict(p.Rw, nil, bc,nil,remoteblockhash)
+			Manager.removePeer(p.id,bc)
+			//sendVersionStartConflict(p.Rw, nil, bc,nil,remoteblockhash)
 		}else{
 			log.Println(" conflict block found ! ",found.String())
 			sendVersionStartConflict(p.Rw, &conflictBlock, bc,nil,remoteblockhash)
