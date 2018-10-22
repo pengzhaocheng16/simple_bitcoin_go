@@ -511,23 +511,31 @@ func handleGetBlocks(p *Peer,command Command, bc *core.Blockchain) {
 		p.forkDrop.Stop()
 		p.forkDrop = nil
 	}
+	lasthash,err := hex.DecodeString(payload.LastHash)
+	if err != nil {
+		log.Panic(err)
+	}
+	block,err := bc.GetBlock(lasthash)
+	if &block != nil && err == nil{
+		blocks := bc.GetBlockHashes(payload.LastHash)
+		var blocksToS = [][]byte{}
 
-	blocks := bc.GetBlockHashes(payload.LastHash)
-	var blocksToS = [][]byte{}
-
-	if(len(blocks) != 0) {
-		for _, b := range blocks{
-			hashStr := hex.EncodeToString(b)
-			if(!p.knownBlocks.Has(hashStr)){
-				p.knownBlocks.Add(hashStr)
-				blocksToS = append(blocksToS,b)
+		if(len(blocks) != 0) {
+			for _, b := range blocks{
+				hashStr := hex.EncodeToString(b)
+				if(!p.knownBlocks.Has(hashStr)){
+					p.knownBlocks.Add(hashStr)
+					blocksToS = append(blocksToS,b)
+				}
+			}
+			log.Println("==<len(blocksToS) %d",len(blocksToS))
+			if(len(blocksToS)>0){
+				sendInv(p.Rw, "block", blocksToS)
+				//sendInv(payload.AddrFrom, "block", blocks)
 			}
 		}
-		log.Println("==<len(blocksToS) %d",len(blocksToS))
-		if(len(blocksToS)>0){
-			sendInv(p.Rw, "block", blocksToS)
-			//sendInv(payload.AddrFrom, "block", blocks)
-		}
+	}else{
+		log.Println("==< remote chain fork block!")
 	}
 }
 
@@ -758,7 +766,7 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 	if myBestHeight.Cmp(foreignerBestHeight) < 0 {
 		//sendGetBlocks(payload.AddrFrom,myLastHash)
 		if(myBestHeight.Cmp(foreignerBestHeight) < 0 ){
-			enqueueVersion(myLastHash.Bytes())
+			//enqueueVersion(myLastHash.Bytes())
 			sendGetBlocks(p.Rw,myLastHashStr)
 		}
 		go func() {
@@ -771,24 +779,32 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 		//sendVersion(payload.AddrFrom, bc)
 		//SendVersion(p.Rw, bc)
 		if(payload.LastBlock != nil && &payload.LastBlock.PrevBlockHash !=nil ){
-			result,reason := bc.IsBlockValidPreHash(payload.LastBlock,&payload.LastBlock.PrevBlockHash)
-			if result {
-				preblock,err := bc.GetBlock(payload.RemoteBlockHash.Bytes())
-				if(err != nil){
-					log.Panic(err)
-				}
-				if(payload.LastBlock.Timestamp.Cmp(preblock.Timestamp) < 0 ){
+			currentForkBlock,err := bc.GetBlock(payload.RemoteBlockHash.Bytes())
+			if(err != nil){
+				log.Panic(err)
+			}
+			log.Println("remoteForkBlock.Height :",payload.LastBlock.Height)
+			log.Println("currentForkBlock.Height :",currentForkBlock.Height)
+			if payload.LastBlock.Height.Cmp(currentForkBlock.Height) != 0{
+				log.Println("fork block not valid:  not same height!")
+			}else{
+			valid,reason := bc.IsBlockValidPreHash(payload.LastBlock,&payload.LastBlock.PrevBlockHash)
+			if valid {
+				if(payload.LastBlock.Timestamp.Cmp(currentForkBlock.Timestamp) < 0 ){
 					var Blocks = bc.GetBlockHashesMap(payload.LastBlock.PrevBlockHash.Bytes())
 					deletedblocks := bc.DelBlockHashes(Blocks)
 					log.Println("deletedblocks len :",len(deletedblocks))
-					utxo := core.UTXOSet{bc}
-					utxo.Recover(deletedblocks)
-					SendVersion(p.Rw,bc)
+					/*utxo := core.UTXOSet{bc}
+					utxo.Recover(deletedblocks)*/
+					_,myLastHash := bc.GetBestHeightLastHash()
+					myLastHashStr := hex.EncodeToString(myLastHash.Bytes())
+					sendGetBlocks(p.Rw,myLastHashStr)
 				}else{
-					sendVersionStartConflict(p.Rw, &preblock, bc,nil,&payload.LastBlock.Hash)
+					sendVersionStartConflict(p.Rw, &currentForkBlock, bc,nil,&payload.LastBlock.Hash)
 				}
 			}else{
 				log.Println("block not valid reason :",reason)
+			}
 			}
 		}else{
 		//check possible conflict fork
@@ -800,33 +816,33 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 		_,err2 := bc.GetBlock(peerLastHash)
 		if(err2 != nil){
 			//blockLastTime := payload.RemoteBlockHash
-			log.Println("error:conflict ",err2)
+			log.Println("error:fork block! ",err2)
 			var blockshash []common.Hash
 			/*if(blockLastTime!=nil){
 				blockshash = bc.GetBlockHashesOfLastTime(100,blockLastTime)
 			}else{*/
 				blockshash = bc.GetBlockHashesOf(100)
 			//}
-			var block core.Block
+			/*var block core.Block
 			var err error
 			if(myBestHeight.Cmp(foreignerBestHeight) == 0){
 				block,err = bc.GetBlock(myLastHash.Bytes())
 				if(err != nil) {
-					log.Println("error:conflict ", err2)
+					log.Println("error:fork block! ", err)
 				}
-			}
+			}*/
 			data := statusData{
 				uint32(1),
 				CurrentNodeInfo.ID,
 				myBestHeight,
 				myLastHash,
-				&block,
+				nil,
 				bc.GenesisHash,
-				blockshash,//up to 10 blocks hash potential confilict block start at
+				blockshash,//up to 100 blocks hash potential confilict block start at
 			}
 			payload := gobEncode(data)
 			p2p.Send(p.Rw, StatusMsg, &Command{"conflict",payload})
-			return
+
 		}
 		}
 		go func(){
@@ -1166,76 +1182,11 @@ func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 	defer versionPQueue.Close()*/
 	//defer os.Remove(queueFile)
 
-	// Dequeue history versiondata and sent version to the peer
-	/*if size,err1 := versionPQueue.Size(1);err1 == nil && size >0 {
-		var found *common.Hash
-		var hashs2del = make(map[string]common.Hash)
-		var j = 0
-	outer:for size,err1 := versionPQueue.Size(1);err1 == nil && size > 0 && j<10;{
-			versionMsg, err2 := versionPQueue.Dequeue()
-			if err2 != nil {
-				log.Panic("create Version myLastHash queue error", err)
-			}
-			if(versionMsg == nil){
-				break
-			}
-			myLastHash := versionMsg.Bytes()
-			blockHashs := bc.GetBlockHashesMap(myLastHash)
-			var hash common.Hash
-			for hashstr,blockhash := range blockHashs {
-				//delete old conflict block
-				found = &blockhash
-				for _,hash = range payload.BlocksHash {
-					if(hashstr != hash.String()){
-						hashs2del[hashstr] = blockhash
-					}else{
-						break outer
-					}
-				}
-			}
-			j = j + 1
-		}
-		blockDeleted := bc.DelBlockHashes(hashs2del)
-		if (len(blockDeleted) == 0) {
-			log.Println("no blocks deleted !")
-		}
-		if found == nil {
-			log.Println("no blocks found !")
-			SendVersionStartConflict(p.Rw, nil, bc)
-		}else{
-			SendVersionStartConflict(p.Rw, found.Bytes(), bc)
-		}
-	}else */{
+	{
 		    lastblock := bc.GetLastBlock()
 			lastHash := lastblock.Hash
-		if(payload.CurrentBlock !=nil && payload.TD.Cmp(lastblock.Height) == 0&&
-			&lastblock != nil&& &lastblock.PrevBlockHash!=nil){
-			var needSyncBlock bool = false
-			valid,reason := bc.IsBlockValidPreHash(payload.CurrentBlock,&lastblock.PrevBlockHash)
-			if( valid ){
-				if(payload.CurrentBlock.Timestamp.Cmp(lastblock.Timestamp) < 0){
-					needSyncBlock = true
-				}
-			}else{
-				getStartAndSendVersion(bc,lastHash,payload,p)
-				log.Printf("in conflict invalide block reason %d ", reason)
-			}
-			if( needSyncBlock ){
-				var hashs2del= make(map[string]common.Hash)
-				hashs2del[lastHash.String()] = lastHash
-				var blocksDeleted = bc.DelBlockHashes(hashs2del)
-				utxo := core.UTXOSet{bc}
-				utxo.Recover(blocksDeleted)
-				if len(blocksDeleted) == 0 {
-					log.Println("no blocks deleted !")
-				}
-				SendVersion(p.Rw,bc)
-			}else{
-				sendVersionStartConflict(p.Rw,&lastblock , bc,nil,&payload.CurrentBlock.Hash)
-			}
-		}else{
-				getStartAndSendVersion(bc,lastHash,payload,p)
-			}
+
+			getStartAndSendVersion(bc,lastHash,payload,p)
 		}
 	//}
 }
@@ -1248,19 +1199,19 @@ func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload sta
 		var remoteblockhash *common.Hash
 		var err1 error
 		var j = 0
+		var i = 0
 	outer1:for ; lastHash.String() != hash0.String() && j <100; {
 			var hash common.Hash
-			found = &lastHash
-			for _,hash = range payload.BlocksHash {
+			for i,hash = range payload.BlocksHash {
 				log.Println("hash.String() ",hash.String())
 				log.Println("lastHash.String() ",lastHash.String())
 				if hash.String() == lastHash.String() {
-					//delete(hashs2del, lastHash.String())
+					delete(hashs2del, lastHash.String())
+					found = &lastHash
 					break outer1
 				}else{
 					hashs2del[lastHash.String()] = lastHash
 				}
-				remoteblockhash = &hash
 			}
 		    conflictBlock, err1 = bc.GetBlock(lastHash.Bytes())
 			if err1 != nil {
@@ -1269,7 +1220,7 @@ func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload sta
 			lastHash = conflictBlock.PrevBlockHash
 			j = j + 1
 		}
-	    log.Println("delete blocks len(hashs2del) !",len(hashs2del))
+	    log.Println("fork blocks len(hashs2del) !",len(hashs2del))
 	/*blocksDeleted := bc.DelBlockHashes(hashs2del)
 	if  len(blocksDeleted) == 0 {
 		log.Println("no blocks deleted !")
@@ -1282,7 +1233,11 @@ func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload sta
 			Manager.removePeer(p.id,bc)
 			//sendVersionStartConflict(p.Rw, nil, bc,nil,remoteblockhash)
 		}else{
-			log.Println(" conflict block found ! ",found.String())
+			if i!= 0 {
+				remoteblockhash = &payload.BlocksHash[i-1]
+			}
+			log.Println(" fork point block found ! ",found.String())
+			log.Println(" fork block hash ",conflictBlock.Hash.String())
 			sendVersionStartConflict(p.Rw, &conflictBlock, bc,nil,remoteblockhash)
 		}
 }

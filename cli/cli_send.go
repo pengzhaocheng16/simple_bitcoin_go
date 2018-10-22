@@ -7,11 +7,10 @@ import (
 	"../p2pprotocol"
 	"time"
 	"encoding/hex"
-	"math/big"
 	"../blockchain_go/state"
 )
 
-func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
+func (cli *CLI) send(from, to string, amount *float64, nodeID string, mineNow bool) {
 	core.MineNow_ = mineNow
 	if !core.ValidateAddress(from) {
 		log.Panic("ERROR: Sender address is not valid")
@@ -48,7 +47,7 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 	var nonce,_ = statedb.GetTransactionNonce(from)
 	pendingState.SetNonce(addr,nonce)
 	statedb.Finalise(true)
-	tx := core.NewUTXOTransaction(nonce,&wallet, to, big.NewInt(int64(amount)),[]byte{}, &UTXOSet,nodeID)
+	tx := core.NewUTXOTransaction(nonce,&wallet, to, amount,[]byte{}, &UTXOSet,nodeID)
 
 	if mineNow {
 		address := wallet.ToCommonAddress().String()
@@ -104,7 +103,7 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 		//select{}
 		for{
 			var send,from,fromaddress,to,toaddress,amount string
-			var amountnum int
+			var amountnum float64
 			fmt.Scanf("%s %s %s %s %s %s %d", &send,&from,&fromaddress,&to,&toaddress,&amount,&amountnum)
 
 			log.Println("--send ",send)
@@ -138,7 +137,7 @@ func (cli *CLI) send(from, to string, amount int, nodeID string, mineNow bool) {
 			//var nonce = statedb.GetNonce(addr)
 			pendingState.SetNonce(addr,nonce)
 			statedb.Finalise(true)
-			tx := core.NewUTXOTransaction(nonce+1,&wallet, toaddress, big.NewInt(int64(amountnum)), []byte{},&UTXOSet,nodeID)
+			tx := core.NewUTXOTransaction(nonce+1,&wallet, toaddress, &amountnum, []byte{},&UTXOSet,nodeID)
 			for _, p := range p2pprotocol.Manager.Peers.Peers {
 				p2pprotocol.SendTx(p, p.Rw, tx)
 			}

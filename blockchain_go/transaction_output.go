@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/gob"
 	"log"
-	"math/big"
 )
 
 // TXOutput represents a transaction output
@@ -26,8 +25,8 @@ func (out *TXOutput) IsLockedWithKey(pubKeyHash []byte) bool {
 }
 
 // NewTXOutput create a new TXOutput
-func NewTXOutput(value *big.Int, address string) *TXOutput {
-	txo := &TXOutput{value.Uint64(), nil}
+func NewTXOutput(value uint64, address string) *TXOutput {
+	txo := &TXOutput{value, nil}
 	txo.Lock([]byte(address))
 
 	return txo

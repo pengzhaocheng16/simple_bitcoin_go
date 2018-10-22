@@ -1162,7 +1162,7 @@ type SendTxArgs struct {
 	To       *common.Address `json:"to"`
 	/*Gas      *hexutil.Uint64 `json:"gas"`
 	GasPrice *hexutil.Big    `json:"gasPrice"`*/
-	Value    *hexutil.Big    `json:"value"`
+	Value    float64    `json:"value"`
 	Nonce    *hexutil.Uint64 `json:"nonce"`
 	// We accept "data" and "input" for backwards-compatibility reasons. "input" is the
 	// newer name and should be preferred by clients.
@@ -1183,8 +1183,9 @@ func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
 		}
 		args.GasPrice = (*hexutil.Big)(price)
 	}*/
-	if args.Value == nil {
-		args.Value = new(hexutil.Big)
+	if &args.Value == nil {
+		//args.Value = new(hexutil.Big)
+		args.Value = float64(0)
 	}
 	if args.Nonce == nil {
 		nonce, err := b.GetPoolNonce(ctx, args.From)
@@ -1225,7 +1226,7 @@ func (args *SendTxArgs) toTransaction(wallet core.Wallet,b Backend) *core.Transa
 	}*/
 	//return core.NewTransaction(uint64(*args.Nonce), *args.To, (*big.Int)(args.Value), uint64(*args.Gas), (*big.Int)(args.GasPrice), input)
 	nodeID := b.GetNodeId()
-	return core.NewTransaction(wallet,uint64(*args.Nonce), args.To, (*big.Int)(args.Value), input,nodeID)
+	return core.NewTransactionAmountFloat(wallet,uint64(*args.Nonce), args.To, args.Value, input,nodeID)
 }
 
 // submitTransaction is a helper function that submits tx to txPool and logs a message.

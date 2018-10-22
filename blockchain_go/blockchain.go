@@ -208,10 +208,10 @@ func (bc *Blockchain) AddBlock(block *Block) {
 
 // FindTransaction finds a transaction by its ID
 func (bc *Blockchain) FindTransaction(ID []byte) (Transaction, error) {
-	bci := bc.Iterator()
-
-	for {
-		block := bci.Next()
+	var tnx Transaction
+	//bci := bc.Iterator()
+	//for {
+		/*block := bci.Next()
 		var ids = hex.EncodeToString(ID)
 		fmt.Printf("tx.ID: \"%s\" \n", ids)
 		for _, tx := range block.Transactions {
@@ -219,11 +219,31 @@ func (bc *Blockchain) FindTransaction(ID []byte) (Transaction, error) {
 				return *tx, nil
 			}
 		}
-
 		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes())  {
 			break
 		}
-	}
+		*/
+		err := bc.Db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(blocksBucket))
+			blockb := tx.Bucket([]byte(utxoBlockBucket))
+
+			blockhash := blockb.Get(ID)
+			blockData := b.Get(blockhash)
+			block := *DeserializeBlock(blockData)
+			for _, tx := range block.Transactions {
+				if bytes.Compare(tx.ID, ID) == 0 {
+					tnx = *tx
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			log.Panic(err)
+		}
+		if(&tnx != nil){
+			return tnx,nil
+		}
+	//}
 
 	return Transaction{}, errors.New("Transaction is not found")
 }
@@ -447,18 +467,20 @@ func (bc *Blockchain) GetBlockHashesMap(lastHash []byte) map[string]common.Hash 
 		}
 		fmt.Printf("--------->GetBlockHashes 2 lastHash %x\n", lastHash)
 		if(bytes.Equal(lastHash,block.Hash.Bytes())) {
-			stopBlock = true
-			continue
-		}
+			//stopBlock = true
+			//continue
+			break
+		}else{
 		hashstr := block.Hash.String()
 		fmt.Printf("--------->GetBlockHashes 3 stopBlock %s\n", stopBlock)
-		if(!stopBlock){
+		//if(!stopBlock){
 			blocks[hashstr] = block.Hash
-		}else{
-			break
+		//}else{
+			//break
+		//}
 		}
 	}
-	fmt.Printf("prepare blocks with %d \n", len(blocks))
+	fmt.Printf("prepare blockhashs with %d \n", len(blocks))
 
 	return blocks
 }
@@ -534,16 +556,17 @@ func (bc *Blockchain) VerifyTransaction(tx *Transaction) bool {
 
 	prevTXs := make(map[string]Transaction)
 
+	fmt.Printf("len(tx.Vin) %d \n", len(tx.Vin))
 	for _, vin := range tx.Vin {
 		prevTX, err := bc.FindTransaction(vin.Txid)
 		if err != nil {
 			log.Panic(err)
 		}
+		fmt.Printf("prevTX.ID %x \n", prevTX.ID)
 		prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
 	}
 
 	return tx.Verify(prevTXs)
-
 }
 
 // make sure block is valid by checking height, and comparing the hash of the previous block
@@ -710,41 +733,45 @@ func calculateHash(block *Block) ([]byte,*ProofOfWork) {
 func (bc *Blockchain) DelBlockHashes(hashs map[string]common.Hash) []*Block {
 	var blocks []*Block
 	if(len(hashs) > 0 ) {
-		bci := bc.Iterator()
+		err := bc.Db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(blocksBucket))
+		if err !=nil {
+			return err
+		}
+		for _,hash := range hashs {
+			blockData := b.Get(hash.Bytes())
+			block := DeserializeBlock(blockData)
 
-		for {
-			block := bci.Next()
-			if bytes.Equal(block.PrevBlockHash.Bytes(), common.BytesToHash([]byte{}).Bytes()) {
-				break
-			}
+			blocks = append(blocks, block)
+		}
+		//recover
+		utxo := UTXOSet{bc}
+		err = utxo.RecoverOuts(tx,blocks)
+		if(err != nil){
+			return err
+		}
+		//delete
+		for _,block := range blocks {
 			if _, ok := hashs[block.Hash.String()]; ok {
-				err := bc.Db.Update(func(tx *bolt.Tx) error {
-					b, err := tx.CreateBucketIfNotExists([]byte(blocksBucket))
-					if err != nil {
-						log.Panic(err)
-					}
-					err = b.Delete(block.Hash.Bytes())
-					if err != nil   {
-						//log.Panic(err)
-						return err
-					}
-					err1 := b.Put([]byte("l"), block.PrevBlockHash.Bytes())
-					if err1 != nil  {
-						//log.Panic(err)
-						return err
-					}
-					return nil
-				})
-				if (err != nil) {
-					log.Panic(err)
+				err = b.Delete(block.Hash.Bytes())
+				if err != nil {
+					//log.Panic(err)
+					return err
+				}
+				err1 := b.Put([]byte("l"), block.PrevBlockHash.Bytes())
+				if err1 != nil {
+					//log.Panic(err)
+					return err
 				}
 
 				bc.tip = block.Hash
-
-				blocks = append(blocks, block)
 			}
-
 		}
+			return nil
+	})
+	if (err != nil) {
+		log.Panic(err)
+	}
 	}
 	fmt.Printf("delete blocks with %d \n", len(blocks))
 

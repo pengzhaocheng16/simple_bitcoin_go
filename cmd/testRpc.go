@@ -49,8 +49,9 @@ func main() {
 
 
 	var nonce = hexutil.Uint64(1)
-	var bigi = new(big.Int).SetInt64(5)
-	var value = (*hexutil.Big)(bigi)
+	//var bigi = new(big.Int).SetInt64(5)
+	//var value = (*hexutil.Big)(bigi)
+	var value = float64(5)
 	var data = hexutil.Bytes{}
 	sendTx.From = from
 	sendTx.To = &to

@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/hex"
 	"log"
-
 	"github.com/boltdb/bolt"
 	"math"
 	"fmt"
@@ -24,8 +23,50 @@ type UTXOSet struct {
 	Blockchain *Blockchain
 }
 
+func (u UTXOSet) FindSpentOutputs(pubkeyHash []byte, amount *big.Int,spentTxids map[string]*TXInput)(uint64, map[string][]int, map[string][]TXOutput){
+	unspentOutputs := make(map[string][]int)
+	unspentExtraOutputs := make(map[string][]TXOutput)
+	accumulated := uint64(0)
+	err := u.Blockchain.Db.View(func(tx *bolt.Tx) error {
+		//b := tx.Bucket([]byte(utxoBucket))
+		blockBucketName := []byte(utxoBlockBucket)
+		blockb := tx.Bucket(blockBucketName)
+		for txidstr,txinput := range spentTxids{
+			var txid,_ = hex.DecodeString(txidstr)
+			var blockHash = blockb.Get(txid)
+			var block,err = u.Blockchain.GetBlock(blockHash)
+			if err != nil {
+				return err
+			}
+			updatedOuts := TXOutputs{}
+			for _,tx := range block.Transactions {
+				if(bytes.Equal(tx.ID,txid)){
+					updatedOuts.Outputs = append(updatedOuts.Outputs, tx.Vout...)
+				}
+			}
+			//out := b.Get(txid)
+			//var outs =  DeserializeOutputs(out)
+			for outIdx, out := range updatedOuts.Outputs {
+				fmt.Printf("IsLockedWithKey %x \n", pubkeyHash)
+				if out.IsLockedWithKey(pubkeyHash) && int64(outIdx) == txinput.Vout.Int64(){
+					fmt.Printf("out.Value %d \n", out.Value)
+					accumulated += uint64(out.Value)
+					unspentOutputs[txidstr] = append(unspentOutputs[txidstr], outIdx)
+				}else{
+					unspentExtraOutputs[txidstr] = append(unspentExtraOutputs[txidstr], out)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Panic(err)
+	}
+	return accumulated, unspentOutputs,unspentExtraOutputs
+}
+
 // FindSpendableOutputs finds and returns unspent outputs to reference in inputs
-func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,receiverCheck bool,spendTxids map[string]*TXInput,txPQueue *PQueue) (uint64, map[string][]int, map[string][]TXOutput) {
+func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount uint64,receiverCheck bool,spentTxids map[string]*TXInput,txPQueue *PQueue) (uint64, map[string][]int, map[string][]TXOutput) {
 	unspentOutputs := make(map[string][]int)
 	unspentExtraOutputs := make(map[string][]TXOutput)
 	accumulated := uint64(0)
@@ -66,9 +107,9 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,receive
 			fmt.Printf("UTXO txID %s \n", txID)
 			if(receiverCheck||(qsize==0||MineNow_ || !pqueue.IsKeyExist(1,k))) {
 				//receiver check transaction is legal or not
-				fmt.Printf("loop start  spendTxid %x \n",spendTxids)
-				if(receiverCheck && spendTxids[txID] == nil){
-					fmt.Printf("is minerCheck continue %d \n", receiverCheck)
+				fmt.Printf("loop start spendTxid %x \n",spentTxids)
+				if(receiverCheck && spentTxids[txID] == nil){
+					fmt.Printf("ignore txid not in tx vin continue %d \n", receiverCheck)
 					continue
 				}
 				for outIdx, out := range outs.Outputs {
@@ -86,7 +127,7 @@ func (u UTXOSet) FindSpendableOutputs(pubkeyHash []byte, amount *big.Int,receive
 						}
 					}
 				}
-				if accumulated >= amount.Uint64(){
+				if accumulated >= amount{
 					break
 				}
 			}else{
@@ -327,9 +368,18 @@ func (u UTXOSet) Recover(blocks []*Block) {
 
 	fmt.Printf("--->recover utxo \n")
 	err := db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(utxoBucket))
-		blockb := tx.Bucket([]byte(utxoBlockBucket))
-		var block *Block
+		var err = u.RecoverOuts(tx,blocks)
+		return err
+	})
+	if err != nil {
+		log.Panic(err)
+	}
+}
+
+func (u UTXOSet) RecoverOuts(tx *bolt.Tx,blocks []*Block)error{
+	b := tx.Bucket([]byte(utxoBucket))
+	blockb := tx.Bucket([]byte(utxoBlockBucket))
+	var block *Block
 	for _,block = range blocks {
 		for _, tx := range block.Transactions {
 			if tx.IsCoinbase() == false {
@@ -404,13 +454,8 @@ func (u UTXOSet) Recover(blocks []*Block) {
 			}
 		}
 	}
-		return nil
-	})
-	if err != nil {
-		log.Panic(err)
-	}
+	return nil
 }
-
 
 // verify transaction:timeLine UTXOAmount coinbaseTX
 func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Block,txPQueue *PQueue) (bool,int) {
@@ -447,9 +492,8 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 			if(!result){
 				return result,9
 			}
-			result = u.IsUTXOAmountValid(tx,nil)
 			//result = u.IsUTXOAmountValid(tx,nil)
-			fmt.Printf("--af IsUTXOAmountValid  result %s \n",result)
+			//fmt.Printf("--af IsUTXOAmountValid  result %s \n",result)
 			queueFile := GenWalletStateDbName(u.Blockchain.NodeId)
 			var errcq error
 			txPQueue, errcq = NewPQueue(queueFile)
@@ -501,13 +545,16 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 
 func (u UTXOSet) IsUTXOAmountValid(tx *Transaction,pqueue *PQueue) bool{
 	pubKeyHash := HashPubKey(tx.Vin[0].PubKey)
-	var spendtxids = map[string]*TXInput{}
+	var spenttxids = map[string]*TXInput{}
 	for _,txin := range tx.Vin{
-		spendtxids[hex.EncodeToString(txin.Txid)] = &txin
+		spenttxids[hex.EncodeToString(txin.Txid)] = &txin
 	}
+	/*acc, _, extraOutputs :=
+		u.FindSpendableOutputs(pubKeyHash, big.NewInt(int64(tx.Vout[0].Value)),true,spenttxids,pqueue)
+	*/
 	acc, _, extraOutputs :=
-		u.FindSpendableOutputs(pubKeyHash, big.NewInt(int64(tx.Vout[0].Value)),true,spendtxids,pqueue)
-	//var acc = 0
+		u.FindSpentOutputs(pubKeyHash, big.NewInt(int64(tx.Vout[0].Value)),spenttxids)
+	///var acc = 0
 	//UTXOs := UTXOSet.FindUTXO(u,pubKeyHash)
 	//fmt.Printf("len UTXOs %d \n", len(UTXOs))
 	//for _, out := range UTXOs {
@@ -540,9 +587,18 @@ func (u UTXOSet) IsUTXOAmountValid(tx *Transaction,pqueue *PQueue) bool{
 func (u *UTXOSet)GetTxInOuts(from common.Address,to common.Address,amount *big.Int,nodeID string)([]TXInput,[]TXOutput,error){
 	defer u.Blockchain.Db.Close()
 	var pubKeyHash []byte = from.Bytes()
-	acc, validOutputs,extraOutputs := u.FindSpendableOutputs(pubKeyHash, amount,false,nil,nil)
 
-	if acc < amount.Uint64() {
+	/*// Convert the amount to honey.
+	honey, err := btcutil.NewAmount(subsidy)
+	if err != nil {
+		context := "Failed to convert amount"
+		log.Println(errors.New(err.Error()+context))
+		return nil,nil,errors.New(err.Error()+context)
+	}*/
+	var honey = amount.Int64()
+	acc, validOutputs,extraOutputs := u.FindSpendableOutputs(pubKeyHash, uint64(honey),false,nil,nil)
+
+	if acc < uint64(honey) {
 		return nil,nil,ErrNotEnoughFunds
 	}
 
@@ -560,14 +616,13 @@ func (u *UTXOSet)GetTxInOuts(from common.Address,to common.Address,amount *big.I
 			inputs = append(inputs, input)
 		}
 	}
-
 	// Build a list of outputs
 	//from := fmt.Sprintf("%s", GetAddressFromPubkeyHash(pubKeyHash))
 	fromstr := fmt.Sprintf("%s", from)
 	tostr := fmt.Sprintf("%s", to)
-	outputs = append(outputs, *NewTXOutput(amount, tostr))
-	if acc > amount.Uint64() {
-		outputs = append(outputs, *NewTXOutput(big.NewInt(int64(acc-amount.Uint64())), fromstr)) // a change
+	outputs = append(outputs, *NewTXOutput(uint64(honey), tostr))
+	if acc > uint64(honey) {
+		outputs = append(outputs, *NewTXOutput(uint64(acc-uint64(honey)), fromstr)) // a change
 	}
 	for _,txouts := range extraOutputs{
 		outputs = append(outputs,txouts...)

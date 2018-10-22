@@ -20,6 +20,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	."../boltqueue"
 	."./state"
+	"github.com/btcsuite/btcutil"
 )
 
 const subsidy = 50
@@ -149,6 +150,7 @@ func (tx *Transaction) HashCommon() common.Hash {
 
 	return common.BytesToHash(hash)
 }
+
 func (tx *Transaction) RawSignatureValues()( *big.Int, *big.Int, *big.Int) {
 
 	return tx.Data.V,tx.Data.R,tx.Data.S
@@ -227,7 +229,16 @@ func (tx Transaction) String() string {
 		lines = append(lines, fmt.Sprintf("       Value:  %d", output.Value))
 		lines = append(lines, fmt.Sprintf("       Script: %x", output.PubKeyHash))
 	}
-	    lines = append(lines, fmt.Sprintf("       Timestamp: %d", tx.Timestamp))
+	if &tx.Data!=nil {
+		lines = append(lines, fmt.Sprintf("     AccountNonce  %d:", tx.Data.AccountNonce))
+		lines = append(lines, fmt.Sprintf("       s:        %x", tx.Data.S))
+		lines = append(lines, fmt.Sprintf("       v:        %x", tx.Data.V))
+		lines = append(lines, fmt.Sprintf("       r:        %x", tx.Data.R))
+		lines = append(lines, fmt.Sprintf("       Payload:  %x", tx.Data.Payload))
+		lines = append(lines, fmt.Sprintf("       GashLimit:%d", tx.Data.GasLimit))
+		lines = append(lines, fmt.Sprintf("       Price:    %d", tx.Data.Price))
+	}
+	    lines = append(lines, fmt.Sprintf("       Timestamp:%d", tx.Timestamp))
 
 	return strings.Join(lines, "\n")
 }
@@ -314,7 +325,15 @@ func NewCoinbaseTX(nonce uint64,to, data,nodeID string) *Transaction {
 	}
 
 	txin := TXInput{[]byte{}, big.NewInt(-1), nil, []byte(data)}
-	txout := NewTXOutput(big.NewInt(subsidy), to)
+
+	// Convert the amount to honey.
+	honey, err := btcutil.NewAmount(subsidy)
+	if err != nil {
+		context := "Failed to convert amount"
+		log.Println(errors.New(err.Error()+context))
+		return nil
+	}
+	txout := NewTXOutput(uint64(honey), to)
 
 	//prepare tx data
 	var toa = Base58ToCommonAddress([]byte(to))
@@ -356,14 +375,21 @@ func NewCoinbaseTX(nonce uint64,to, data,nodeID string) *Transaction {
 
 // NewUTXOTransaction creates a new transaction
 // sign transaction
-func NewUTXOTransaction(nonce uint64,wallet *Wallet, to string, amount *big.Int,data []byte, UTXOSet *UTXOSet,nodeID string) *Transaction {
+func NewUTXOTransaction(nonce uint64,wallet *Wallet, to string, amount *float64,data []byte, UTXOSet *UTXOSet,nodeID string) *Transaction {
 	pubKeyHash := HashPubKey(wallet.PublicKey)
 	var inputs []TXInput
 	var outputs []TXOutput
 
-	acc, validOutputs,extraOutputs := UTXOSet.FindSpendableOutputs(pubKeyHash, amount,false,nil,nil)
+	// Convert the amount to honey.
+	honey, err := btcutil.NewAmount(subsidy)
+	if err != nil {
+		context := "Failed to convert amount"
+		log.Println(errors.New(err.Error()+context))
+		return nil
+	}
+	acc, validOutputs,extraOutputs := UTXOSet.FindSpendableOutputs(pubKeyHash, uint64(honey),false,nil,nil)
 
-	if acc < amount.Uint64() {
+	if acc < uint64(honey) {
 		log.Panic("ERROR: Not enough funds")
 	}
 
@@ -381,9 +407,9 @@ func NewUTXOTransaction(nonce uint64,wallet *Wallet, to string, amount *big.Int,
 
 	// Build a list of outputs
 	from := fmt.Sprintf("%s", wallet.GetAddress())
-	outputs = append(outputs, *NewTXOutput(amount, to))
-	if acc > amount.Uint64() {
-		outputs = append(outputs, *NewTXOutput(big.NewInt(int64(acc-amount.Uint64())), from)) // a change
+	outputs = append(outputs, *NewTXOutput(uint64(honey), to))
+	if acc > uint64(honey) {
+		outputs = append(outputs, *NewTXOutput(uint64(acc-uint64(honey)), from)) // a change
 	}
 	for _,txouts := range extraOutputs{
 		outputs = append(outputs,txouts...)
@@ -410,8 +436,8 @@ func NewUTXOTransaction(nonce uint64,wallet *Wallet, to string, amount *big.Int,
 		R:            new(big.Int),
 		S:            new(big.Int),
 	}
-	if amount.Uint64() != 0 {
-		d.Amount.Set(amount)
+	if uint64(honey) != 0 {
+		d.Amount.Set(big.NewInt(int64(honey)))
 	}
 
 	//sign transaction
@@ -523,7 +549,7 @@ func PendingIn(chainId string,tx *Transaction){
 	txPQueue.Close()
 }
 
-func VerifyTx(tx Transaction,bc *Blockchain)bool{
+func VerifyTx(tx Transaction,bc *Blockchain)(bool){
 	if &tx == nil {
 		fmt.Println("transaction %x is nil:",&tx.ID)
 		return false
@@ -550,6 +576,8 @@ func VerifyTx(tx Transaction,bc *Blockchain)bool{
 		valid2 = false
 	}
 	valid3 = VeryfyFromToAddress(&tx)
+	fmt.Printf("valid1  %s\n", valid1)
+	fmt.Printf("valid2  %s\n", valid2)
 	fmt.Printf("valid3  %s\n", valid3)
 
 	if(valid1 && valid2 && valid3){
@@ -601,7 +629,27 @@ func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 /**
 	new transaction to sign
  */
-func NewTransaction(wallet Wallet,nonce uint64,to *common.Address,amount *big.Int,input []byte,nodeID string)*Transaction{
+func NewTransactionAmountFloat(wallet Wallet,nonce uint64,to *common.Address,amount float64,input []byte,nodeID string)*Transaction {
+	// Ensure amount is in the valid range for monetary amounts.
+	if amount <= 0 || amount > btcutil.MaxSatoshi {
+		log.Println(errors.New("Invalid amount"))
+		return nil
+	}
+
+	// Convert the amount to honey.
+	honey, err := btcutil.NewAmount(amount)
+	if err != nil {
+		context := "Failed to convert amount"
+		log.Println(errors.New(err.Error()+context))
+		return nil
+	}
+	return NewTransaction(wallet,nonce,to,int64(honey),input,nodeID)
+}
+/**
+new transaction to sign
+*/
+func NewTransaction(wallet Wallet,nonce uint64,to *common.Address,honey int64,input []byte,nodeID string)*Transaction{
+
 	var bc = NewBlockchain(nodeID)
 	uTXOSet := UTXOSet{bc}
 
@@ -609,10 +657,10 @@ func NewTransaction(wallet Wallet,nonce uint64,to *common.Address,amount *big.In
 	var inputs []TXInput
 	var outputs []TXOutput
 
-	acc, validOutputs,extraOutputs := uTXOSet.FindSpendableOutputs(pubKeyHash, amount,false,nil,nil)
+	acc, validOutputs,extraOutputs := uTXOSet.FindSpendableOutputs(pubKeyHash,uint64(honey),false,nil,nil)
 	bc.Db.Close()
 
-	if acc < amount.Uint64() {
+	if acc < uint64(honey) {
 		log.Panic("ERROR: Not enough funds")
 	}
 
@@ -630,9 +678,9 @@ func NewTransaction(wallet Wallet,nonce uint64,to *common.Address,amount *big.In
 
 	// Build a list of outputs
 	from := fmt.Sprintf("%s", wallet.GetAddress())
-	outputs = append(outputs, *NewTXOutput(amount, CommonAddressToBase58(to)))
-	if acc > amount.Uint64() {
-		outputs = append(outputs, *NewTXOutput(big.NewInt(int64(acc-amount.Uint64())), from)) // a change
+	outputs = append(outputs, *NewTXOutput(uint64(honey), CommonAddressToBase58(to)))
+	if acc > uint64(honey) {
+		outputs = append(outputs, *NewTXOutput(acc-uint64(honey), from)) // a change
 	}
 	for _,txouts := range extraOutputs{
 		outputs = append(outputs,txouts...)
@@ -642,7 +690,7 @@ func NewTransaction(wallet Wallet,nonce uint64,to *common.Address,amount *big.In
 		AccountNonce: nonce,
 		Recipient:    to ,
 		Payload:      input,
-		Amount:       amount,
+		Amount:       big.NewInt(int64(honey)),
 		//GasLimit:     gasLimit,
 		//Price:        new(big.Int),
 		V:            new(big.Int),
