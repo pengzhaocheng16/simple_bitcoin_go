@@ -650,6 +650,15 @@ func (bc *Blockchain)IsBlockValidPreHash(newBlock *Block,preHash *common.Hash) (
 		return false,reason
 	}
 
+	//block txs size
+	var sizeTotal float64 = 0
+	for _,tx := range newBlock.Transactions{
+		sizeTotal = sizeTotal + float64(tx.Size())
+	}
+	if sizeTotal >= 4 * 1024 *1024 {
+		reason = 6
+		return false,reason
+	}
 	//transaction consistent validate
 	UTXOSet := UTXOSet{bc}
 
