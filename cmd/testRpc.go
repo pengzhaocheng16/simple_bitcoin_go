@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"../rpc"
 	"../internal/swcapi"
-	"math/big"
 	"../blockchain_go"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common"
+	"log"
 )
 
 func main() {
@@ -19,12 +19,10 @@ func main() {
 		return
 	}
 
-	var  blockNumber uint64
+	/*var  blockNumber uint64
 	var  swc_coinbase string
 	var  clientversion string
 	var  block map[string]interface{}
-	var  txhash common.Hash
-	var  txhash1 common.Hash
 
 	err = client.Call(&blockNumber, "eth_blockNumber")
 	err = client.Call(&swc_coinbase, "eth_coinbase")
@@ -38,41 +36,45 @@ func main() {
 	var bigint1 = new(big.Int).SetInt64(0)
 	var bigNumber1 = (*hexutil.Big)(bigint1)
 	err = client.Call(&balance, "eth_getBalance","1Q1oECL9rvC642THhNB6QZMqU55fDieXDK",bigNumber1)
-
+*/
+	var  txhash common.Hash
+	var  txhash1 common.Hash
 	sendTx := new(swcapi.SendTxArgs)
 	sendTx1 := new(swcapi.SendTxArgs)
 	var from = core.Base58ToCommonAddress([]byte("1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5"))
+	log.Println("==>from：", from.String())
+
 	//var to = core.Base58ToCommonAddress([]byte("1Q1oECL9rvC642THhNB6QZMqU55fDieXDK"))
 	var to = core.Base58ToCommonAddress([]byte("1G7EmF7Umd96FLMKh3PhqZCi3bfMzqC4tH"))
 	var from1 = core.Base58ToCommonAddress([]byte("1Mfi82c8d54iD28DPQ98SG4bPkmUSeWxw5"))
 	var to1 = core.Base58ToCommonAddress([]byte("1G7EmF7Umd96FLMKh3PhqZCi3bfMzqC4tH"))
 
 
-	var nonce = hexutil.Uint64(1)
+	//var nonce = hexutil.Uint64(1)
 	//var bigi = new(big.Int).SetInt64(5)
 	//var value = (*hexutil.Big)(bigi)
-	var value = float64(5)
+	var value = float64(0.1)
 	var data = hexutil.Bytes{}
 	sendTx.From = from
 	sendTx.To = &to
-	sendTx.Nonce = &nonce
+	sendTx.Nonce = nil
 	sendTx.Value = value
 	sendTx.Data = &data
 
 	sendTx1.From = from1
 	sendTx1.To = &to1
-	sendTx1.Nonce = &nonce
+	sendTx1.Nonce = nil
 	sendTx1.Value = value
 	sendTx1.Data = &data
 
 	err = client.Call(&txhash, "personal_sendTransaction",sendTx,"")
 	err = client.Call(&txhash1, "personal_sendTransaction",sendTx1,"")
-
+/*
 	fmt.Println("eth_blockNumber ", blockNumber)
 	fmt.Println("eth_coinbase ", swc_coinbase)
 	fmt.Println("web3_clientversion ", clientversion)
 	fmt.Println("eth_getBlockByNumber ", block)
-	fmt.Println("eth_getBalance ",balance )
+	fmt.Println("eth_getBalance ",balance )*/
 	fmt.Println("personal_sendTransaction ",txhash )
 	fmt.Println("personal_sendTransaction1 ",txhash1 )
 

@@ -41,24 +41,24 @@ func (cli *CLI) send(from, to string, amount *float64, nodeID string, mineNow bo
 		log.Panic(err)
 	}
 	var addr = wallet.ToCommonAddress()
+	address := addr.String()
 
 	var pendingState = state.ManageState(statedb)
 	//var nonce = pendingState.GetNonce(addr)
-	var nonce,_ = statedb.GetTransactionNonce(from)
+	var nonce,_ = statedb.GetTransactionNonce(address)
 	pendingState.SetNonce(addr,nonce)
 	statedb.Finalise(true)
 	tx := core.NewUTXOTransaction(nonce,&wallet, to, amount,[]byte{}, &UTXOSet,nodeID)
 
 	if mineNow {
-		address := wallet.ToCommonAddress().String()
 		statedb.PutTransaction(tx.ID,tx.Serialize(),address)
 
 		fmt.Println("==>NewCoinbaseTX ")
 		//var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(from)))
 		//var nonce = statedb.GetNonce(addr)
-		var nonce,_ = statedb.GetTransactionNonce(from)
+		var nonce,_ = statedb.GetTransactionNonce(address)
 
-		cbTx := core.NewCoinbaseTX(nonce+1,from, "",nodeID)
+		cbTx := core.NewCoinbaseTX(nonce,from, "",nodeID)
 		txs := []*core.Transaction{cbTx, tx}
 		statedb.PutTransaction(cbTx.ID,cbTx.Serialize(),address)
 

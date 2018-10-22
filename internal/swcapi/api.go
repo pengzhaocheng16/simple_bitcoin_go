@@ -353,18 +353,23 @@ func (s *PrivateAccountAPI) LockAccount(addr common.Address) bool {
 // NOTE: the caller needs to ensure that the nonceLock is held, if applicable,
 // and release it after the transaction has been submitted to the tx pool
 func (s *PrivateAccountAPI) signTransaction(ctx context.Context, args SendTxArgs, passwd string) (*core.Transaction, error) {
+
+	fmt.Printf("===bf signTransaction  Account\n")
 	// Look up the wallet containing the requested signer
 	account := accounts.Account{Address: args.From}
 	/*wallet, err := s.am.Find(account)
 	if err != nil {
 		return nil, err
 	}*/
+	fmt.Printf("===bf signTransaction  NewWallets\n")
 	wallets, err := core.NewWallets(s.b.GetNodeId())
 	if err != nil {
 		return nil,err
 	}
+	fmt.Printf("===bf signTransaction  GetWallet\n")
 	wallet := wallets.GetWallet(core.CommonAddressToBase58(&args.From))
 
+	fmt.Printf("===bf signTransaction  setDefaults\n")
 	// Set some sanity defaults and terminate on failure
 	if err := args.setDefaults(ctx, s.b); err != nil {
 		return nil, err
@@ -395,7 +400,8 @@ func (s *PrivateAccountAPI) SendTransaction(ctx context.Context, args SendTxArgs
 	println("nonce ",args.Nonce)
 	println("from ",args.From.String())
 	println("to ",args.To.String())
-	if args.Nonce == nil {
+	if  args.Nonce == nil {
+		println("nonce1  ",args.Nonce)
 		// Hold the addresse's mutex around signing to prevent concurrent assignment of
 		// the same nonce to multiple accounts.
 		s.nonceLock.LockAddr(args.From)
@@ -406,7 +412,7 @@ func (s *PrivateAccountAPI) SendTransaction(ctx context.Context, args SendTxArgs
 	if err != nil {
 		return common.Hash{}, err
 	}
-	return submitTransaction(ctx, s.b, signed)
+	return submitTransaction(ctx, s.b, signed,args.From)
 }
 // SignTransaction will create a transaction from the given arguments and
 // tries to sign it with the key associated with args.To. If the given passwd isn't
@@ -1187,7 +1193,7 @@ func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
 		//args.Value = new(hexutil.Big)
 		args.Value = float64(0)
 	}
-	if args.Nonce == nil {
+	if args.Nonce == nil{
 		nonce, err := b.GetPoolNonce(ctx, args.From)
 		//nonce = nonce +1
 		if err != nil {
@@ -1230,10 +1236,10 @@ func (args *SendTxArgs) toTransaction(wallet core.Wallet,b Backend) *core.Transa
 }
 
 // submitTransaction is a helper function that submits tx to txPool and logs a message.
-func submitTransaction(ctx context.Context, b Backend, tx *core.Transaction) (common.Hash, error) {
+func submitTransaction(ctx context.Context, b Backend, tx *core.Transaction,from common.Address) (common.Hash, error) {
 	fmt.Printf("===  before submitTransaction:%x \n",tx.CommonHash())
 	var err error
-	if err = b.SendTx(ctx, tx); err != nil {
+	if err = b.SendTx(ctx, tx,from); err != nil {
 		fmt.Printf("===  after submitTransaction:%s \n",err)
 		return common.Hash{}, err
 	}
@@ -1300,8 +1306,8 @@ func (s *PublicTransactionPoolAPI) SendRawTransaction(ctx context.Context, encod
 	}
 	//nodeID := s.b.GetNodeId()
 	//tx1 = core.NewTransactionSigned(tx.RawSignatureValues(),tx.Nonce(), tx.To(), tx.Value(), tx.Data(),nodeID)
-
-	return submitTransaction(ctx, s.b, tx)
+	var signer = core.HomesteadSigner{}
+	return submitTransaction(ctx, s.b, tx,tx.From(signer))
 }
 /*
 // Sign calculates an ECDSA signature for:

@@ -11,7 +11,7 @@ import (
 	//"github.com/ethereum/go-ethereum/trie"
 	//"encoding/hex"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
+	"log"
 	"os"
 	"math/big"
 	"strings"
@@ -110,15 +110,15 @@ func New(root common.Hash, db *bolt.DB,nodeId string) (*WalletTransactions, erro
 
 func (uts *WalletTransactions) InitDB(nodeId,address string) error {
 	dbFile := GenWalletStateDbName(nodeId)
-	fmt.Printf("wallet transaction file %s\n",dbFile)
+	//fmt.Printf("wallet transaction file %s\n",dbFile)
 	if DbExists(dbFile) {
-		fmt.Println("wallet transaction file already exists.")
+		//fmt.Println("wallet transaction file already exists.")
 		//os.Exit(1)
 	}
 
 	db, err := bolt.Open(dbFile, 0600, nil)
 	if err != nil {
-		log.Error("InitDB","error",err)
+		log.Fatal("InitDB","error",err)
 		os.Exit(0)
 	}
 	uts.DB = db;
@@ -203,7 +203,9 @@ func (uts *WalletTransactions) PutTransaction(txID []byte, txdata []byte,address
 			return err
 		}
 		cb := b.Get([]byte("counter"))
-		if(cb==nil){
+		log.Println(" counter address :",address)
+		log.Println(" counter len(cb):",len(cb))
+		if(cb == nil||len(cb) == 0){
 			cb := make([]byte, 8)
 			binary.BigEndian.PutUint64(cb, 0)
 			b.Put([]byte("counter"),cb)
@@ -215,13 +217,14 @@ func (uts *WalletTransactions) PutTransaction(txID []byte, txdata []byte,address
 			binary.BigEndian.PutUint64(cb, x)
 
 			b.Put([]byte("counter"),cb[:])
+			log.Println(" counter:",uint64(binary.BigEndian.Uint64(cb)))
 		}
 
 		if b == nil {
 			return NewDBIsNotReadyError()
 		}
-
-		return b.Put(txID, txdata)
+		return nil
+		//return b.Put(txID, txdata)
 	})
 }
 
@@ -256,7 +259,10 @@ func (uts *WalletTransactions) GetTransactionNonce(address string) (uint64, erro
 
 		cb := b.Get([]byte("counter"))
 		//to genesis block counter is empty 对于创世块
-		if(len(cb) == 0){
+		log.Println(" get counter address :",address)
+		log.Println(" get counter len(cb) :",len(cb))
+		if(cb == nil||len(cb) == 0){
+			log.Println(" get counter 0 :",nonce)
 			cb = make([]byte,8)
 			binary.BigEndian.PutUint64(cb, uint64(1))
 			b.Put([]byte("counter"),cb)
@@ -265,9 +271,11 @@ func (uts *WalletTransactions) GetTransactionNonce(address string) (uint64, erro
 		}
 		nonce = uint64(binary.BigEndian.Uint64(cb))
 
+		log.Println(" get counter 1 :",nonce)
 		return nil
 	})
 	if err != nil {
+		log.Println(" get counter error :",nonce)
 		return 0, err
 	}
 	return nonce, nil
@@ -568,7 +576,7 @@ func (self *WalletTransactions) getStateObject(addr common.Address) (stateObject
 	}
 	var data Account
 	if err := rlp.DecodeBytes(enc1, &data); err != nil {
-		log.Error("Failed to decode state object", "addr", addr, "err", err)
+		log.Fatal("Failed to decode state object", "addr", addr, "err", err)
 		return nil
 	}
 	// Insert into the live set.
@@ -632,6 +640,6 @@ func (s *WalletTransactions) Commit(deleteEmptyObjects bool) (root common.Hash, 
 			}
 			return nil
 	})*/
-	log.Debug("Trie cache stats after commit", "misses", trie.CacheMisses(), "unloads", trie.CacheUnloads())
+	log.Println("Trie cache stats after commit", "misses", trie.CacheMisses(), "unloads", trie.CacheUnloads())
 	return root, err
 }

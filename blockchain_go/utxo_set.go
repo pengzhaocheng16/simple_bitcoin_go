@@ -6,11 +6,13 @@ import (
 	"github.com/boltdb/bolt"
 	"math"
 	"fmt"
+	"errors"
 	."../boltqueue"
 	."./state"
 	"math/big"
 	"github.com/ethereum/go-ethereum/common"
 	"bytes"
+	"github.com/btcsuite/btcutil"
 )
 
 const utxoBucket = "chainstate"
@@ -528,7 +530,15 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 	//fmt.Printf("coinbaseReward %s \n", math.Pow(0.5, math.Floor(float64(block.Height/halfRewardblockCount)))*subsidy )
 	//fmt.Printf("coinbaseReward %s \n", coinbaseReward)
 	//in that block reward timeperiod less than that currenteward
-	if(math.Pow(0.5, math.Floor(float64(block.Height.Int64()/halfRewardblockCount)))*subsidy != float64(coinbaseReward)){
+	var rewardFloat = math.Pow(0.5, math.Floor(float64(block.Height.Int64()/halfRewardblockCount)))*subsidy
+	// Convert the amount to honey.
+	rewardHoney, err := btcutil.NewAmount(rewardFloat)
+	if err != nil {
+		context := "Failed to convert amount"
+		log.Println(errors.New(err.Error()+context))
+		return false,14
+	}
+	if(uint64(rewardHoney) != coinbaseReward){
 		return false,11
 	}
 	if(block.Timestamp.Cmp(lastBlockTime) <=0 ){

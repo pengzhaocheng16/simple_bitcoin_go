@@ -841,8 +841,9 @@ func (bc *Blockchain)GetBalance(address common.Address, nodeID string)*big.Int{
 
 	UTXOs := UTXOSet.FindUTXO(pubKeyHash)
 
+	log.Println("ERROR:block number not same:",len(UTXOs))
 	for _, out := range UTXOs {
-		balance.Add(big.NewInt(balance.Int64()),
+		balance = balance.Add(balance,
 			big.NewInt(int64(out.Value)))
 	}
 	return balance

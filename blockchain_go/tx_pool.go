@@ -1009,7 +1009,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) {
 		fmt.Println("pool.queue[addr] list.txs.items", addr, list.txs.items)
 		fmt.Println(" == list.Ready ","pool.pendingState[addr]-", pool.pendingState.GetNonce(addr))
 		for _, tx := range list.Ready(pool.pendingState.GetNonce(addr)) {
-			fmt.Println("Promoting queued transaction", "tx", tx)
+			fmt.Println("Promoting queued transaction", "tx", tx.CommonHash().String())
 		//for _, tx := range list.Ready(pool.pendingState[addr]) {
 			hash := tx.CommonHash()
 			if pool.promoteTx(addr, hash, tx) {

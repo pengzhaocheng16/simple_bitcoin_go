@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/event"
 	"encoding/hex"
+	"../blockchain_go/state"
 )
 
 //import "github.com/ethereum/go-ethereum/eth/gasprice"
@@ -175,7 +176,7 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 		return b.swc.BlockChain().SubscribeLogsEvent(ch)
 	}
 */
-	func (b *SwcAPIBackend) SendTx(ctx context.Context, signedTx *core.Transaction) error {
+	func (b *SwcAPIBackend) SendTx(ctx context.Context, signedTx *core.Transaction,from common.Address) error {
 		log.Info("===Manager.Peers.Peers len %d ","info",len(Manager.Peers.Peers))
 		signedTx.InitFrom(b.swc.txPool.Signer)
 		// TODO pool lock mangement
@@ -186,19 +187,21 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 		}*/
 
 		Manager.TxMempool[hex.EncodeToString(signedTx.ID)] = signedTx
-
-		//set nonce to statedb
-		var pendingState = Manager.txPool.State()
-		// Make sure the transaction is signed properly
-		from, err := core.Sender(Manager.txPool.Signer, signedTx)
+		from1, err := core.Sender(Manager.txPool.Signer, signedTx)
 		if err != nil {
-			log.Error("error",core.ErrInvalidSender)
+			log.Error("error", core.ErrInvalidSender)
 		}
-		pendingState.SetNonce(from,signedTx.Nonce())
-		//pendingState.StateDB.Finalise(true)
-		err = b.swc.txPool.AddLocal(signedTx)
-		pendingState.StateDB.PutTransaction(signedTx.ID,signedTx.Serialize(),from.String())
-		fmt.Printf("===AddLocal %s \n", "error",err)
+		//set nonce to statedb
+		sdb := state.WalletTransactions{}
+		sdb.PutTransaction(signedTx.ID,signedTx.Serialize(),from.String())
+		go func() {
+			var pendingState= Manager.txPool.State()
+			// Make sure the transaction is signed properly
+			pendingState.SetNonce(from1, signedTx.Nonce())
+			//pendingState.StateDB.Finalise(true)
+			err = b.swc.txPool.AddLocal(signedTx)
+			fmt.Printf("===AddLocal %s \n", "error",err)
+		}()
 
 		return nil
 	}
@@ -221,7 +224,10 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 
 	func (b *SwcAPIBackend) GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error) {
 		// b.swc.txPool.State().GetNonce(addr), nil
-		return b.swc.txPool.State().StateDB.GetTransactionNonce(addr.String())
+
+		sdb := state.WalletTransactions{}
+		//return b.swc.txPool.State().StateDB.GetTransactionNonce(addr.String())
+		return sdb.GetTransactionNonce(addr.String())
 	}
 
 	func (b *SwcAPIBackend) GetNodeId() string{

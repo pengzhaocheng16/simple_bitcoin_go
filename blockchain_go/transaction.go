@@ -67,6 +67,11 @@ func (tx Transaction)To()*common.Address{
 	return tx.Data.Recipient
 }
 
+func (tx Transaction)From(signer Signer)common.Address{
+	addr, _ := signer.Sender(&tx)
+	return addr
+}
+
 func (tx Transaction)Value()*big.Int{
 	return big.NewInt(int64(tx.Vout[0].Value))
 	//return tx.Data.Amount
@@ -381,7 +386,7 @@ func NewUTXOTransaction(nonce uint64,wallet *Wallet, to string, amount *float64,
 	var outputs []TXOutput
 
 	// Convert the amount to honey.
-	honey, err := btcutil.NewAmount(subsidy)
+	honey, err := btcutil.NewAmount(*amount)
 	if err != nil {
 		context := "Failed to convert amount"
 		log.Println(errors.New(err.Error()+context))
