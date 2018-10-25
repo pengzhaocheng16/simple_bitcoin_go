@@ -252,11 +252,13 @@ func (pool *TxPool) loop() {
 				if pool.chainconfig.IsHomestead(ev.Block.Height) {
 					pool.homestead = true
 				}
+
 				pool.Bc = NewBlockchain(pool.Bc.NodeId)
-				defer pool.Bc.Db.Close()
 				//pool.reset(head.Header(), ev.Block.Header())
 				pool.reset(head, ev.Block)
+				pool.Bc.Db.Close()
 				head = ev.Block
+				fmt.Println("chainHeadCh ", "reset block height :", head.Height)
 
 				pool.mu.Unlock()
 			}
@@ -1166,6 +1168,7 @@ func (pool *TxPool) demoteUnexecutables() {
 		nonce := pool.currentState.GetNonce(addr)
 		//nonce,_ := GetPoolNonce(pool.Bc.NodeId,addr.String())
 
+		fmt.Println("==>after receive block nonce with addr :",addr.String()," nonce :" ,nonce)
 		// Drop all transactions that are deemed too old (low nonce)
 		for _, tx := range list.Forward(nonce) {
 			hash := tx.CommonHash()

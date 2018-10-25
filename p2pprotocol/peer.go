@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"../p2p/discover"
 	"github.com/ethereum/go-ethereum/event"
+	"math"
 )
 
 const (
@@ -204,18 +205,18 @@ func (pm *ProtocolManager) BroadcastTxs(txs core.Transactions) {
 	}
 }
 
-/*
+
 // BroadcastBlock will either propagate a block to a subset of it's peers, or
 // will only announce it's availability (depending what's requested).
 func (pm *ProtocolManager) BroadcastBlock(block *core.Block, propagate bool) {
 	hash := block.Hash
-	peers := pm.Peers.PeersWithoutBlock(hash)
+	peers := pm.Peers.PeersWithoutBlock(hash.Bytes())
 
 	// If propagation is requested, send to a subset of the peer
 	if propagate {
 		// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
 		var td *big.Int
-		if parent,err := pm.blockchain.GetBlock(block.PrevBlockHash); &parent != nil &&err == nil {
+		if parent,err := pm.Bc.GetBlock(block.PrevBlockHash.Bytes()); &parent != nil &&err == nil {
 			//td = new(big.Int).Add(block.Difficulty, pm.blockchain.GetTd(block.PrevBlockHash))
 			td = block.Height
 		} else {
@@ -237,7 +238,7 @@ func (pm *ProtocolManager) BroadcastBlock(block *core.Block, propagate bool) {
 	//	}
 	//	log.Trace("Announced block", "hash", hash, "recipients", len(peers), "duration", common.PrettyDuration(time.Since(block.ReceivedAt)))
 	//}
-}*/
+}
 
 
 // syncTransactions starts sending all currently pending transactions to the given peer.
@@ -352,6 +353,18 @@ func (pm *ProtocolManager) txBroadcastLoop() {
 		}
 	}
 }
+/*
+// Mined broadcast loop
+func (pm *ProtocolManager) minedBroadcastLoop() {
+	// automatically stops if unsubscribe
+	for obj := range pm.minedBlockSub.Chan() {
+		switch ev := obj.Data.(type) {
+		case core.NewMinedBlockEvent:
+			pm.BroadcastBlock(ev.Block, true)  // First propagate block to peers
+			pm.BroadcastBlock(ev.Block, false) // Only then announce to the rest
+		}
+	}
+}*/
 
 func (pm *ProtocolManager) Start(maxPeers int) {
 	pm.maxPeers = maxPeers
@@ -360,14 +373,14 @@ func (pm *ProtocolManager) Start(maxPeers int) {
 	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
 	pm.txsSub = pm.txPool.SubscribeNewTxsEvent(pm.txsCh)
 	go pm.txBroadcastLoop()
-	/*
-		// broadcast mined blocks
-		pm.minedBlockSub = pm.eventMux.Subscribe(core.NewMinedBlockEvent{})
-		go pm.minedBroadcastLoop()
 
-		// start sync handlers
-		go pm.syncer()
-		go pm.txsyncLoop()*/
+		// broadcast mined blocks
+		/*pm.minedBlockSub = pm.eventMux.Subscribe(core.NewMinedBlockEvent{})
+		go pm.minedBroadcastLoop()*/
+	/*
+			// start sync handlers
+			go pm.syncer()
+			go pm.txsyncLoop()*/
 }
 
 func (pm *ProtocolManager) Stop() {

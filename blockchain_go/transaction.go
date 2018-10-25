@@ -172,7 +172,7 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 		}
 	}
 
-	txCopy := tx.TrimmedCopy()
+	txCopy := tx.TrimmedCopy(false)
 
 	for inID, vin := range txCopy.Vin {
 		prevTx := prevTXs[hex.EncodeToString(vin.Txid)]
@@ -182,6 +182,7 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 		dataToSign := fmt.Sprintf("%x\n", txCopy.RLPHash())
 
 		r, s, err := ecdsa.Sign(rand.Reader, &privKey, []byte(dataToSign))
+		//crypto.Sign([]byte(dataToSign), &privKey)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -249,7 +250,7 @@ func (tx Transaction) String() string {
 }
 
 // TrimmedCopy creates a trimmed copy of Transaction to be used in signing
-func (tx *Transaction) TrimmedCopy() Transaction {
+func (tx *Transaction) TrimmedCopy(noData bool) Transaction {
 	var inputs []TXInput
 	var outputs []TXOutput
 
@@ -265,10 +266,18 @@ func (tx *Transaction) TrimmedCopy() Transaction {
 	v.Store(common.StorageSize(0))
 	var froma = atomic.Value{}
 	froma.Store(common.Address{})
+
+	if noData {
+		tx.Data.V = nil
+		tx.Data.R = nil
+		tx.Data.S = nil
+	}
+
 	txCopy := Transaction{tx.ID, inputs, outputs,
 	tx.Timestamp,tx.size,tx.Data,froma}
 	tx.SetSize(uint64(len(tx.Serialize())))
 	//txCopy.size.Store(tx.Size())
+
 
 	return txCopy
 }
@@ -285,7 +294,7 @@ func (tx *Transaction) Verify(prevTXs map[string]Transaction) bool {
 		}
 	}
 
-	txCopy := tx.TrimmedCopy()
+	txCopy := tx.TrimmedCopy(true)
 	curve := crypto.S256()
 
 	for inID, vin := range tx.Vin {
@@ -343,15 +352,7 @@ func NewCoinbaseTX(nonce uint64,to, data,nodeID string) *Transaction {
 	//prepare tx data
 	var toa = Base58ToCommonAddress([]byte(to))
 	//coinbase tx no from address
-	address := toa.String()
-	var wt = new(WalletTransactions)
-	wt.InitDB(nodeID,address)
-	//nonce,err := wt.GetTransactionNonce(address)
-	//nonce := Manager.txPool.State().GetNonce(addr)
-	wt.DB.Close()
-	/*if(err!=nil){
-		log.Panic(err)
-	}*/
+
 	d := txdata{
 		AccountNonce: nonce,
 		Recipient:    &toa,
@@ -554,7 +555,22 @@ func PendingIn(chainId string,tx *Transaction){
 	txPQueue.Close()
 }
 
-func VerifyTx(tx Transaction,bc *Blockchain)(bool){
+func HasDoubleSpent(txs []*Transaction)bool{
+	var txmap  = make(map[string][]byte,0);
+	for _,tx := range txs {
+		for _,vin := range tx.Vin {
+			if txmap[hex.EncodeToString(vin.Txid)] != nil{
+				return true
+			}
+		}
+		for _,vin := range tx.Vin {
+			txmap[hex.EncodeToString(vin.Txid)] = vin.Txid
+		}
+	}
+	return false
+}
+
+func VerifyTx(tx Transaction,bc *Blockchain,preHash *common.Hash)(bool){
 	if &tx == nil {
 		fmt.Println("transaction %x is nil:",&tx.ID)
 		return false
@@ -574,9 +590,9 @@ func VerifyTx(tx Transaction,bc *Blockchain)(bool){
 		valid1 = false
 	}
 
-
 	UTXOSet := UTXOSet{bc}
-	if(tx.IsCoinbase()==false&&!UTXOSet.IsUTXOAmountValid(&tx,nil)){
+	var result = UTXOSet.IsUTXOAmountValid(&tx,preHash)
+	if(tx.IsCoinbase()==false&&!result){
 		//log.Panic("ERROR: Invalid transaction:amount")
 		valid2 = false
 	}

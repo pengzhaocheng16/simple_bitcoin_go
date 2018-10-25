@@ -662,7 +662,7 @@ func (bc *Blockchain)IsBlockValidPreHash(newBlock *Block,preHash *common.Hash) (
 	//transaction consistent validate
 	UTXOSet := UTXOSet{bc}
 
-	valid,reason := UTXOSet.VerifyTxTimeLineAndUTXOAmount(oldBlock.Timestamp,newBlock,nil)
+	valid,reason := UTXOSet.VerifyTxTimeLineAndUTXOAmount(oldBlock.Timestamp,newBlock,preHash)
 	log.Printf("--af  VerifyTxTimeLineAndUTXOAmount valid: %s \n",valid)
 
 	if(!valid){
@@ -850,7 +850,7 @@ func (bc *Blockchain)GetBalance(address common.Address, nodeID string)*big.Int{
 
 	UTXOs := UTXOSet.FindUTXO(pubKeyHash)
 
-	log.Println("ERROR:block number not same:",len(UTXOs))
+	log.Println("INFO:len(UTXOs):",len(UTXOs))
 	for _, out := range UTXOs {
 		balance = balance.Add(balance,
 			big.NewInt(int64(out.Value)))

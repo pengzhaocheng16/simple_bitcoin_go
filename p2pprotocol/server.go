@@ -524,13 +524,16 @@ func handleGetBlocks(p *Peer,command Command, bc *core.Blockchain) {
 			for _, b := range blocks{
 				hashStr := hex.EncodeToString(b)
 				if(!p.knownBlocks.Has(hashStr)){
-					p.knownBlocks.Add(hashStr)
 					blocksToS = append(blocksToS,b)
 				}
 			}
 			log.Println("==<len(blocksToS) %d",len(blocksToS))
 			if(len(blocksToS)>0){
 				sendInv(p.Rw, "block", blocksToS)
+				for _,blockhash := range blocksToS{
+					hashStr := hex.EncodeToString(blockhash)
+					p.knownBlocks.Add(hashStr)
+				}
 				//sendInv(payload.AddrFrom, "block", blocks)
 			}
 		}
@@ -567,7 +570,7 @@ func handleGetData(p *Peer,command Command, bc *core.Blockchain) {
 		if(tx!=nil){
 			//SendTx(payload.AddrFrom, &tx)
 			SendTx(p, p.Rw, tx)
-			//TODO delete from queue after user new transaction been comfirmed
+			// delete from queue after user new transaction been comfirmed
 			// delete(queue, txID)
 		}
 	}
@@ -624,10 +627,6 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 	if err != nil {
 		log.Panic(err)
 	}
-	var txlist core.Transactions
-	for _, batch := range pending {
-		txlist = append(txlist, batch...)
-	}
 
 	if nodeAddress == BootNodes[0] {
 		/*for _, node := range BootNodes {
@@ -639,9 +638,15 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 		//sendInv(p.Rw, "tx", [][]byte{tx.ID})
 	} else {
 		fmt.Println("==>len tx")
+	//MineTransactions:
+		var txlist core.Transactions
+		for _, batch := range pending {
+			txlist = append(txlist, batch...)
+		}
 		//if len(Manager.TxMempool) >= 2 && len(miningAddress) > 0 {
 		if len(txlist) >= 2 && len(miningAddress) > 0 {
-		MineTransactions:
+
+
 			var txs []*core.Transaction
 
 			fmt.Println("==>Loopsync")
@@ -657,30 +662,30 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 			}
 
 			fmt.Println("==>VerifyTx ")
-			queueFile := state.GenWalletStateDbName(bc.NodeId)
+			/*queueFile := state.GenWalletStateDbName(bc.NodeId)
 			pqueue, errcq := NewPQueue(queueFile)
 			if errcq != nil {
 				log.Panic("create queue error",errcq)
 			}
-			defer pqueue.Close()
+			defer pqueue.Close()*/
 			var sizeTotal float64 = 0
 			//for id,txMine := range Manager.TxMempool {
 			for _,txMine := range txlist {
-				//in case of double spend
+				/*//in case of double spend
 				for _, vin := range txMine.Vin {
 					pqueue.SetMsg(1, vin.Txid, txMine.ID)
-				}
+				}*/
 				//verify transaction
 				//block txs size limit to 4M
-				if(core.VerifyTx(*txMine,bc) && sizeTotal < 4 * 1024 *1024) {
+				if(core.VerifyTx(*txMine,bc,nil) && sizeTotal < 4 * 1024 *1024) {
 					sizeTotal = sizeTotal + float64(txMine.Size())
 					txs = append(txs, txMine)
 				}
 			}
 			if len(txs)>1 && len(txs) < 2 && len(miningAddress) > 0 {
-				for _, vin := range txs[0].Vin {
+				/*for _, vin := range txs[0].Vin {
 					pqueue.DeleteMsg(1, vin.Txid)
-				}
+				}*/
 				return errResp(1, "transactions not enough" )
 			}
 
@@ -689,25 +694,29 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 				return errResp(2, "transactions empty" )
 			}
 
-			var pendingState = Manager.txPool.State()
-			fmt.Println("==>NewCoinbaseTX ")
+			//var pendingState = Manager.txPool.State()
+			fmt.Println("==>GetTransactionNonce")
 			//var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(miningAddress)))
 
 			var commonaddr = core.Base58ToCommonAddress([]byte(miningAddress))
-			var nonce,_ = pendingState.StateDB.GetTransactionNonce(commonaddr.String())
-			cbTx := core.NewCoinbaseTX(nonce+1,miningAddress, "",bc.NodeId)
-			pendingState.StateDB.PutTransaction(cbTx.ID,cbTx.Serialize(),commonaddr.String())
-			pendingState.SetNonce(commonaddr,nonce+1)
+			sdb := state.WalletTransactions{}
+			//sdb.NodeId = bc.NodeId
+			var nonce,_ = sdb.GetTransactionNonce(commonaddr.String())
+			//var nonce = pendingState.GetNonce(commonaddr)
+			fmt.Println("==>NewCoinbaseTX ")
+			cbTx := core.NewCoinbaseTX(nonce,miningAddress, "",bc.NodeId)
+			sdb.PutTransaction(cbTx.ID,cbTx.Serialize(),commonaddr.String())
+			//pendingState.SetNonce(commonaddr,nonce)
 
+			fmt.Println("==>MineBlock ")
 			txs = append(txs, cbTx)
 			newBlock := bc.MineBlock(txs)
-
 
 			if(newBlock != nil){
 				UTXOSet := core.UTXOSet{bc}
 				//UTXOSet.Reindex()
 				UTXOSet.Update(newBlock)
-				fmt.Println("New block is mined!")
+				fmt.Println("==>New block is mined!")
 
 				for _, node := range BootNodes {
 					if node != nodeAddress {
@@ -719,26 +728,33 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 						}
 					}
 				}
-			}/*
-			for _, tx := range txs {
-				txID := hex.EncodeToString(tx.ID)
-				delete(Manager.TxMempool, txID)
-				//commit transaction nonce
-				var pendingState = Manager.txPool.State()
-				from, err := core.Sender(Manager.txPool.Signer, tx)
-				if err != nil {
-					log.Panic( core.ErrInvalidSender)
+				for _, tx := range txs {
+					txID := hex.EncodeToString(tx.ID)
+					delete(Manager.TxMempool, txID)
+					txlist = nil
+
+					//commit transaction nonce
+					//tx.InitFrom(Manager.txPool.Signer)
+					var pendingState = Manager.txPool.State()
+					/*from, err := core.Sender(Manager.txPool.Signer, tx)
+					if err != nil {
+						log.Panic( core.ErrInvalidSender)
+					}*/
+					from = tx.From(Manager.txPool.Signer)
+					fmt.Println("==>after mine set nonce with from :",from.String())
+					pendingState.SetNonce(from,tx.Data.AccountNonce)
+
+					pendingState.StateDB.Finalise(true)
+
+					events := bc.Events([]*core.Block{newBlock})
+					bc.PostChainEvents(events,nil)
 				}
-				pendingState.SetNonce(from,tx.Data.AccountNonce)
-
-				//statedb.Finalise(true)
-			}*/
-
-			fmt.Println("==>after mine len(txlist) ",len(txlist))
-			//if len(Manager.TxMempool) > 0 {
-			if len(txlist) > 0 {
-				goto MineTransactions
 			}
+			fmt.Println("==>after mine len(pending) ",len(pending))
+			//if len(Manager.TxMempool) > 0 {
+			/*if len(pending) > 0 {
+				goto MineTransactions
+			}*/
 		}
 	}
 	return nil
@@ -765,10 +781,10 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 
 	if myBestHeight.Cmp(foreignerBestHeight) < 0 {
 		//sendGetBlocks(payload.AddrFrom,myLastHash)
-		if(myBestHeight.Cmp(foreignerBestHeight) < 0 ){
-			//enqueueVersion(myLastHash.Bytes())
-			sendGetBlocks(p.Rw,myLastHashStr)
-		}
+		//enqueueVersion(myLastHash.Bytes())
+		sendGetBlocks(p.Rw,myLastHashStr)
+		fmt.Println("---myBestHeight:", myBestHeight)
+
 		go func() {
 			select {
 			case Manager.BestTd <- foreignerBestHeight:

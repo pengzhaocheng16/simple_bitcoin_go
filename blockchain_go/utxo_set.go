@@ -29,6 +29,7 @@ func (u UTXOSet) FindSpentOutputs(pubkeyHash []byte, amount *big.Int,spentTxids 
 	unspentOutputs := make(map[string][]int)
 	unspentExtraOutputs := make(map[string][]TXOutput)
 	accumulated := uint64(0)
+
 	err := u.Blockchain.Db.View(func(tx *bolt.Tx) error {
 		//b := tx.Bucket([]byte(utxoBucket))
 		blockBucketName := []byte(utxoBlockBucket)
@@ -460,73 +461,36 @@ func (u UTXOSet) RecoverOuts(tx *bolt.Tx,blocks []*Block)error{
 }
 
 // verify transaction:timeLine UTXOAmount coinbaseTX
-func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Block,txPQueue *PQueue) (bool,int) {
+func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Block,preHash *common.Hash) (bool,int) {
 	//TODO timeline check
 	var coinbaseNumber = uint64(0)
 	var coinbaseReward = uint64(0)
 	var result = false;
-	queueFile := GenWalletStateDbName(u.Blockchain.NodeId)
-	txPQueue, errcq := NewPQueue(queueFile)
-	if errcq != nil{
-		log.Panic(errcq)
+
+	// every tx onetime use as tx vin
+	var double = HasDoubleSpent(block.Transactions)
+	if(double){
+		return false,8
 	}
 
-	for k, tx := range block.Transactions {
+	for _, tx := range block.Transactions {
 
 		if tx.IsCoinbase() == false {
-			//if vin txid in transaction has used return false
-			for _,Vin := range tx.Vin {
-				vintx := txPQueue.IsKeyExist(4,Vin.Txid)
-				if (vintx){
-					//delete outdated vin txid in database
-					for _,tx1 := range block.Transactions[0:k]{
-						for _,in := range tx1.Vin{
-							//delete vin tx id
-							txPQueue.DeleteMsg(4,in.Txid)
-						}
-					}
-					return false,8;
-				}
-			}
-			txPQueue.Close()
+
 			fmt.Println("--bf IsUTXOAmountValid  \n")
-			result = VerifyTx(*tx,u.Blockchain)
+			result = VerifyTx(*tx,u.Blockchain,preHash)
+
 			if(!result){
-				return result,9
+					return false,10
 			}
 			//result = u.IsUTXOAmountValid(tx,nil)
 			//fmt.Printf("--af IsUTXOAmountValid  result %s \n",result)
-			queueFile := GenWalletStateDbName(u.Blockchain.NodeId)
-			var errcq error
-			txPQueue, errcq = NewPQueue(queueFile)
-			//defer txPQueue.Close()
-			if errcq != nil {
-				log.Panic("create queue error", errcq)
-			}
-			if(!result){
-				fmt.Println("--bf result check false  \n")
-				//delete outdated vin txid in database
-				for _,tx1 := range block.Transactions[0:k]{
-					for _,in := range tx1.Vin{
-						//delete vin tx id
-						txPQueue.DeleteMsg(4,in.Txid)
-					}
-				}
-				return result,10
-			}else{
-				fmt.Println("--bf result check true \n")
-				//txid has used put it in database
-				for _,Vin := range tx.Vin{
-					txPQueue.SetMsg(4,Vin.Txid,Vin.Txid)
-				}
-			}
-			txPQueue.Close()
+
 		}else{
 			coinbaseNumber = coinbaseNumber +1
 			coinbaseReward = tx.Vout[0].Value
 		}
 	}
-	//txPQueue.Close()
 	//fmt.Printf("coinbaseReward %s \n", math.Pow(0.5, math.Floor(float64(block.Height/halfRewardblockCount)))*subsidy )
 	//fmt.Printf("coinbaseReward %s \n", coinbaseReward)
 	//in that block reward timeperiod less than that currenteward
@@ -553,17 +517,21 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 	return true,0
 }
 
-func (u UTXOSet) IsUTXOAmountValid(tx *Transaction,pqueue *PQueue) bool{
+func (u UTXOSet) IsUTXOAmountValid(tx *Transaction,preHash *common.Hash) bool{
 	pubKeyHash := HashPubKey(tx.Vin[0].PubKey)
 	var spenttxids = map[string]*TXInput{}
 	for _,txin := range tx.Vin{
 		spenttxids[hex.EncodeToString(txin.Txid)] = &txin
 	}
-	/*acc, _, extraOutputs :=
-		u.FindSpendableOutputs(pubKeyHash, big.NewInt(int64(tx.Vout[0].Value)),true,spenttxids,pqueue)
-	*/
-	acc, _, extraOutputs :=
+	var acc uint64
+	var extraOutputs map[string][]TXOutput
+	if preHash !=nil {
+	acc, _, extraOutputs =
 		u.FindSpentOutputs(pubKeyHash, big.NewInt(int64(tx.Vout[0].Value)),spenttxids)
+	}else{
+		acc, _, extraOutputs =
+			u.FindSpendableOutputs(pubKeyHash, tx.Vout[0].Value,true,spenttxids,nil)
+	}
 	///var acc = 0
 	//UTXOs := UTXOSet.FindUTXO(u,pubKeyHash)
 	//fmt.Printf("len UTXOs %d \n", len(UTXOs))

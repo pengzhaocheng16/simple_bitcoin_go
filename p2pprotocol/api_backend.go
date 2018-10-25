@@ -193,6 +193,7 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 		}
 		//set nonce to statedb
 		sdb := state.WalletTransactions{}
+		//sdb.NodeId = b.swc.nodeID
 		sdb.PutTransaction(signedTx.ID,signedTx.Serialize(),from.String())
 		go func() {
 			var pendingState= Manager.txPool.State()
