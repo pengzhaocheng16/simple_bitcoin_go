@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"fmt"
 	"math/big"
+	"log"
 )
 
 type SwarmChain struct {
@@ -42,7 +43,9 @@ type SwarmChain struct {
 }
 
 // New creates a new SwarmChain object
-func New(ctx *node.ServiceContext,config *node.Config,bc *core.Blockchain) (*SwarmChain, error) {
+func New(ctx *node.ServiceContext,config *node.Config) (*SwarmChain, error) {
+
+	bc := core.NewBlockchain(config.NodeID)
 
 	swc := &SwarmChain{
 		//blockchain:bc,
@@ -65,6 +68,10 @@ func New(ctx *node.ServiceContext,config *node.Config,bc *core.Blockchain) (*Swa
 
 	swc.txPool = core.NewTxPool(TxPoolConfig, chainConfig,bc)
 	Manager.txPool = swc.txPool
+	/*// broadcast transactions
+	Manager.txsCh = make(chan core.NewTxsEvent, txChanSize)
+	Manager.txsSub = Manager.txPool.SubscribeNewTxsEvent(Manager.txsCh)
+	go Manager.txBroadcastLoop()*/
 
 	swc.ApiBackend = &SwcAPIBackend{swc}
 
@@ -178,7 +185,6 @@ func (s *SwarmChain) Start(srvr *p2p.Server) error {
 	s.netRPCService = ethapi.NewPublicNetAPI(srvr, s.NetVersion())
 */
 	// Figure out a max peers count based on the server limits
-	maxPeers := srvr.MaxPeers
 	/*if s.config.LightServ > 0 {
 		if s.config.LightPeers >= srvr.MaxPeers {
 			return fmt.Errorf("invalid peer config: light peer count (%d) >= total peer count (%d)", s.config.LightPeers, srvr.MaxPeers)
@@ -186,7 +192,9 @@ func (s *SwarmChain) Start(srvr *p2p.Server) error {
 		maxPeers -= s.config.LightPeers
 	}*/
 
+	maxPeers := srvr.MaxPeers
 	// Start the networking layer and the light server if requested
+	log.Println("-----protocolManager.Start maxPeers: ",maxPeers)
 	s.protocolManager.Start(maxPeers)
 	/*if s.lesServer != nil {
 		s.lesServer.Start(srvr)

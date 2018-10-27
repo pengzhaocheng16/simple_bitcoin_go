@@ -203,6 +203,10 @@ func (pm *ProtocolManager) BroadcastTxs(txs core.Transactions) {
 	for peer, txs := range txset {
 		peer.AsyncSendTransactions(txs)
 	}
+	//mine
+	bc := core.NewBlockchain(pm.nodeID)
+	defer bc.Db.Close()
+	mineBlock(bc)
 }
 
 
@@ -345,8 +349,8 @@ func (pm *ProtocolManager) txBroadcastLoop() {
 	for {
 		select {
 		case event := <-pm.txsCh:
+			log.Println("---txBroadcastLoop :")
 			pm.BroadcastTxs(event.Txs)
-
 			// Err() channel will be closed when unsubscribing.
 		case <-pm.txsSub.Err():
 			return
@@ -369,13 +373,12 @@ func (pm *ProtocolManager) minedBroadcastLoop() {
 func (pm *ProtocolManager) Start(maxPeers int) {
 	pm.maxPeers = maxPeers
 
-	// broadcast transactions
 	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
 	pm.txsSub = pm.txPool.SubscribeNewTxsEvent(pm.txsCh)
 	go pm.txBroadcastLoop()
 
-		// broadcast mined blocks
-		/*pm.minedBlockSub = pm.eventMux.Subscribe(core.NewMinedBlockEvent{})
+	// broadcast mined blocks
+	/*pm.minedBlockSub = pm.eventMux.Subscribe(core.NewMinedBlockEvent{})
 		go pm.minedBroadcastLoop()*/
 	/*
 			// start sync handlers
@@ -530,9 +533,9 @@ func msgHandler(peer *p2p.Peer, ws p2p.MsgReadWriter) error {
 			// handle decode error
 			continue
 		}
-		bc1 := core.NewBlockchain(nodeID)
+		//bc1 := core.NewBlockchain(nodeID)
 
-		HandleConnection(p,myMessage,bc1)
+		HandleConnection(p,myMessage,nil)
 		//bc1.Db.Close()
 	}
 

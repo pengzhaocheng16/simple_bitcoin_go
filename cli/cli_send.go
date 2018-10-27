@@ -60,7 +60,7 @@ func (cli *CLI) send(from, to string, amount *float64, nodeID string, mineNow bo
 
 		cbTx := core.NewCoinbaseTX(nonce,from, "",nodeID)
 		txs := []*core.Transaction{cbTx, tx}
-		statedb.PutTransaction(cbTx.ID,cbTx.Serialize(),address)
+		statedb.PutTransaction(cbTx.ID,cbTx.Serialize(),from)
 
 		newBlock := bc.MineBlock(txs)
 		UTXOSet.Update(newBlock)

@@ -270,7 +270,6 @@ func sendGetBlocks(addr p2p.MsgWriter, lastHash string) {
 func sendGetData(addr p2p.MsgWriter, kind string, id []byte) {
 	payload := gobEncode(getdata{nodeAddress, kind, id})
 	//request := append(commandToBytes("getdata"), payload...)
-
 	command := Command{
 		Command:"getdata",
 		Data:payload,
@@ -554,10 +553,15 @@ func handleGetData(p *Peer,command Command, bc *core.Blockchain) {
 	}
 
 	if payload.Type == "block" {
+		Manager.Mu.Lock()
+		defer Manager.Mu.Unlock()
+
+		log.Println("== bf get block!")
 		block, err := bc.GetBlock(payload.ID)
 		if err != nil {
 			return
 		}
+		log.Println("== af get block!")
 
 		//sendBlock(payload.AddrFrom, &block)
 		sendBlock(p.Rw, &block)
@@ -623,10 +627,6 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 	tnxs = append(tnxs, &tx)
 	Manager.BroadcastTxs(tnxs)*/
 
-	pending, err := Manager.txPool.Pending()
-	if err != nil {
-		log.Panic(err)
-	}
 
 	if nodeAddress == BootNodes[0] {
 		/*for _, node := range BootNodes {
@@ -637,125 +637,138 @@ func handleTx(p *Peer, command Command, bc *core.Blockchain) error{
 		}*/
 		//sendInv(p.Rw, "tx", [][]byte{tx.ID})
 	} else {
-		fmt.Println("==>len tx")
+		//mineBlock(bc)
+	}
+	return nil
+}
+
+func mineBlock(bc *core.Blockchain) error{
+	Manager.Mu.Lock()
+	defer Manager.Mu.Unlock()
+
 	//MineTransactions:
-		var txlist core.Transactions
-		for _, batch := range pending {
-			txlist = append(txlist, batch...)
+	pending, err := Manager.txPool.Pending()
+	if err != nil {
+		log.Panic(err)
+	}
+
+	var txlist core.Transactions
+	for _, batch := range pending {
+		txlist = append(txlist, batch...)
+	}
+	fmt.Println("==>len tx",len(txlist))
+
+	var txs []*core.Transaction
+	var sizeTotal float64 = 0
+	//for id,txMine := range Manager.TxMempool {
+	for _,txMine := range txlist {
+		/*//in case of double spend
+		for _, vin := range txMine.Vin {
+			pqueue.SetMsg(1, vin.Txid, txMine.ID)
+		}*/
+		//verify transaction
+		//block txs size limit to 4M
+		if(core.VerifyTx(*txMine,bc,nil) && sizeTotal < 4 * 1024 *1024) {
+			sizeTotal = sizeTotal + float64(txMine.Size())
+			txs = append(txs, txMine)
 		}
-		//if len(Manager.TxMempool) >= 2 && len(miningAddress) > 0 {
-		if len(txlist) >= 2 && len(miningAddress) > 0 {
-
-
-			var txs []*core.Transaction
-
-			fmt.Println("==>Loopsync")
-			//wait block sync complete
-			select{
-			case ch := <- Manager.BestTd:
-				td,_ := bc.GetBestHeight()
-				log.Println("---td 1:",td)
-				if(td.Cmp(ch) == 0){
-					log.Println("---td:",ch)
-					break
-				}
+	}
+	//if len(Manager.TxMempool) >= 2 && len(miningAddress) > 0 {
+	if len(txs) >= 2 && len(miningAddress) > 0 {
+		fmt.Println("==>Loopsync")
+		//wait block sync complete
+		select{
+		case ch := <- Manager.BestTd:
+			td,_ := bc.GetBestHeight()
+			log.Println("---td 1:",td)
+			if(td.Cmp(ch) == 0){
+				log.Println("---td:",ch)
+				break
 			}
+		}
 
-			fmt.Println("==>VerifyTx ")
-			/*queueFile := state.GenWalletStateDbName(bc.NodeId)
-			pqueue, errcq := NewPQueue(queueFile)
-			if errcq != nil {
-				log.Panic("create queue error",errcq)
-			}
-			defer pqueue.Close()*/
-			var sizeTotal float64 = 0
-			//for id,txMine := range Manager.TxMempool {
-			for _,txMine := range txlist {
-				/*//in case of double spend
-				for _, vin := range txMine.Vin {
-					pqueue.SetMsg(1, vin.Txid, txMine.ID)
-				}*/
-				//verify transaction
-				//block txs size limit to 4M
-				if(core.VerifyTx(*txMine,bc,nil) && sizeTotal < 4 * 1024 *1024) {
-					sizeTotal = sizeTotal + float64(txMine.Size())
-					txs = append(txs, txMine)
-				}
-			}
-			if len(txs)>1 && len(txs) < 2 && len(miningAddress) > 0 {
-				/*for _, vin := range txs[0].Vin {
-					pqueue.DeleteMsg(1, vin.Txid)
-				}*/
-				return errResp(1, "transactions not enough" )
-			}
+		fmt.Println("==>VerifyTx ")
+		/*queueFile := state.GenWalletStateDbName(bc.NodeId)
+		pqueue, errcq := NewPQueue(queueFile)
+		if errcq != nil {
+			log.Panic("create queue error",errcq)
+		}
+		defer pqueue.Close()*/
 
-			if len(txs) == 0 {
-				fmt.Println("All transactions are invalid! Waiting for new ones...")
-				return errResp(2, "transactions empty" )
-			}
+		if len(txs)>1 && len(txs) < 2 && len(miningAddress) > 0 {
+			/*for _, vin := range txs[0].Vin {
+				pqueue.DeleteMsg(1, vin.Txid)
+			}*/
+			return errResp(1, "transactions not enough" )
+		}
 
-			//var pendingState = Manager.txPool.State()
-			fmt.Println("==>GetTransactionNonce")
-			//var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(miningAddress)))
+		if len(txs) == 0 {
+			fmt.Println("All transactions are invalid! Waiting for new ones...")
+			return errResp(2, "transactions empty" )
+		}
 
-			var commonaddr = core.Base58ToCommonAddress([]byte(miningAddress))
-			sdb := state.WalletTransactions{}
-			//sdb.NodeId = bc.NodeId
-			var nonce,_ = sdb.GetTransactionNonce(commonaddr.String())
-			//var nonce = pendingState.GetNonce(commonaddr)
-			fmt.Println("==>NewCoinbaseTX ")
-			cbTx := core.NewCoinbaseTX(nonce,miningAddress, "",bc.NodeId)
-			sdb.PutTransaction(cbTx.ID,cbTx.Serialize(),commonaddr.String())
-			//pendingState.SetNonce(commonaddr,nonce)
+		//var pendingState = Manager.txPool.State()
+		fmt.Println("==>GetTransactionNonce")
+		//var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(miningAddress)))
 
-			fmt.Println("==>MineBlock ")
-			txs = append(txs, cbTx)
-			newBlock := bc.MineBlock(txs)
+		var commonaddr = core.Base58ToCommonAddress([]byte(miningAddress))
+		sdb := state.WalletTransactions{}
+		//sdb.NodeId = bc.NodeId
+		var nonce,_ = sdb.GetTransactionNonce(commonaddr.String())
+		//var nonce = pendingState.GetNonce(commonaddr)
+		fmt.Println("==>NewCoinbaseTX ")
+		cbTx := core.NewCoinbaseTX(nonce,miningAddress, "",bc.NodeId)
+		sdb.PutTransaction(cbTx.ID,cbTx.Serialize(),commonaddr.String())
+		//pendingState.SetNonce(commonaddr,nonce)
 
-			if(newBlock != nil){
-				UTXOSet := core.UTXOSet{bc}
-				//UTXOSet.Reindex()
-				UTXOSet.Update(newBlock)
-				fmt.Println("==>New block is mined!")
+		fmt.Println("==>MineBlock ")
+		txs = append(txs, cbTx)
+		newBlock := bc.MineBlock(txs)
 
-				for _, node := range BootNodes {
-					if node != nodeAddress {
-						//sendInv(node, "block", [][]byte{newBlock.Hash})
-						//sendInv(p.Rw, "block", [][]byte{newBlock.Hash})
-						//Manager.BroadcastBlock(newBlock,true)
-						for _,peer := range Manager.Peers.Peers {
-							SendVersion(peer.Rw,bc)
-						}
+		if(newBlock != nil){
+			UTXOSet := core.UTXOSet{bc}
+			//UTXOSet.Reindex()
+			UTXOSet.Update(newBlock)
+			fmt.Println("==>New block is mined!")
+
+			for _, node := range BootNodes {
+				if node != nodeAddress {
+					//sendInv(node, "block", [][]byte{newBlock.Hash})
+					//sendInv(p.Rw, "block", [][]byte{newBlock.Hash})
+					//Manager.BroadcastBlock(newBlock,true)
+					for _,peer := range Manager.Peers.Peers {
+						SendVersion(peer.Rw,bc)
 					}
 				}
-				for _, tx := range txs {
-					txID := hex.EncodeToString(tx.ID)
-					delete(Manager.TxMempool, txID)
-					txlist = nil
-
-					//commit transaction nonce
-					//tx.InitFrom(Manager.txPool.Signer)
-					var pendingState = Manager.txPool.State()
-					/*from, err := core.Sender(Manager.txPool.Signer, tx)
-					if err != nil {
-						log.Panic( core.ErrInvalidSender)
-					}*/
-					from = tx.From(Manager.txPool.Signer)
-					fmt.Println("==>after mine set nonce with from :",from.String())
-					pendingState.SetNonce(from,tx.Data.AccountNonce)
-
-					pendingState.StateDB.Finalise(true)
-
-					events := bc.Events([]*core.Block{newBlock})
-					bc.PostChainEvents(events,nil)
-				}
 			}
-			fmt.Println("==>after mine len(pending) ",len(pending))
-			//if len(Manager.TxMempool) > 0 {
-			/*if len(pending) > 0 {
-				goto MineTransactions
-			}*/
+			for _, tx := range txs {
+				txID := hex.EncodeToString(tx.ID)
+				delete(Manager.TxMempool, txID)
+				txlist = nil
+
+				//commit transaction nonce
+				//tx.InitFrom(Manager.txPool.Signer)
+				var pendingState = Manager.txPool.State()
+				/*from, err := core.Sender(Manager.txPool.Signer, tx)
+				if err != nil {
+					log.Panic( core.ErrInvalidSender)
+				}*/
+				var from = tx.From(Manager.txPool.Signer)
+				fmt.Println("==>after mine set nonce with from :",from.String())
+				pendingState.SetNonce(from,tx.Data.AccountNonce)
+
+				pendingState.StateDB.Finalise(true)
+
+				events := bc.Events([]*core.Block{newBlock})
+				go bc.PostChainEvents(events,nil)//not work !
+				Manager.txPool.RemoveTx(tx.CommonHash())
+			}
 		}
+		fmt.Println("==>after mine len(pending) ",len(pending))
+		//if len(Manager.TxMempool) > 0 {
+		/*if len(pending) > 0 {
+			goto MineTransactions
+		}*/
 	}
 	return nil
 }
@@ -889,26 +902,37 @@ func HandleConnection(p *Peer,command Command, bc *core.Blockchain) {
 	//	log.Panic(err)
 	//}
 	//command := bytesToCommand(request[:commandLength])
-	defer bc.Db.Close()
 	fmt.Printf("Received %s command\n", command.Command)
 
 	switch command.Command {
 	case "addr":
 		handleAddr(command)
 	case "block":
+		bc := core.NewBlockchain(Manager.nodeID)
 		handleBlock(p,command, bc)
+		bc.Db.Close()
 	case "inv":
+		bc := core.NewBlockchain(Manager.nodeID)
 		handleInv(p,command, bc)
+		bc.Db.Close()
 	case "getblocks":
+		bc := core.NewBlockchain(Manager.nodeID)
 		handleGetBlocks(p,command, bc)
+		bc.Db.Close()
 	case "getdata":
+		bc := core.NewBlockchain(Manager.nodeID)
 		handleGetData(p,command, bc)
+		bc.Db.Close()
 	case "tx":
-		handleTx(p,command, bc)
+		handleTx(p,command, nil)
 	case "version":
+		bc := core.NewBlockchain(Manager.nodeID)
 		handleVersion(p,command, bc)
+		bc.Db.Close()
 	case "conflict":
+		bc := core.NewBlockchain(Manager.nodeID)
 		handleConflict(p,command, bc)
+		bc.Db.Close()
 	default:
 		fmt.Println("Unknown command!")
 	}
@@ -1064,7 +1088,7 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 	}
 	stack, err := node.New(conf)
 	// Register a batch of life-cycle instrumented services
-	services := map[string]node.InstrumentingWrapper{
+	/*services := map[string]node.InstrumentingWrapper{
 		"A": node.InstrumentedServiceMakerA,
 		"B": node.InstrumentedServiceMakerB,
 		"C": node.InstrumentedServiceMakerC,
@@ -1085,7 +1109,7 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 			//t.Fatalf("service %s: registration failed: %v", id, err)
 			log.Fatalf("service %s: registration failed: %v", id, err)
 		}
-	}
+	}*/
 	// Restart the stack a few times and check successful service restarts
 	//for i := 0; i < 2; i++ {
 	//	if err := stack.Restart(nil); err != nil {
@@ -1095,9 +1119,9 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 	//if  len(started) != 3 {
 	//	log.Fatalf("running/started mismatch: have %v/%d, want true/4", running, started)
 	//}
-
+/*
 	bc := core.NewBlockchain(nodeID)
-	defer bc.Db.Close()
+	defer bc.Db.Close()*/
 
 	//td,_:= bc.GetBestHeight()
 	Manager = &ProtocolManager{
@@ -1112,7 +1136,7 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 	}
 
 	err = stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		fullNode, err := New(ctx,conf,bc)
+		fullNode, err := New(ctx,conf)
 
 		return fullNode, err
 	})
@@ -1120,7 +1144,6 @@ func StartServer(nodeID, minerAddress string, ipcPath string,host string,port in
 		log.Fatalf("Failed to register the Ethereum service: %v", err)
 	}
 	StartNode(stack,running)
-
 
 	//defer bc.Db.Close()
 	// start sync handlers

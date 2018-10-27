@@ -782,6 +782,22 @@ func (pool *TxPool) Get(hash common.Hash) *Transaction {
 	return pool.all.Get(hash)
 }
 
+func (pool *TxPool) RemoveTx(hash common.Hash){
+	tx := pool.all.Get(hash)
+	if tx == nil {
+		return
+	}
+	addr, _ := Sender(pool.Signer, tx) // already validated during insertion
+
+	pending := pool.pending[addr]
+	if removed, _ := pending.Remove(tx); removed {
+		// If no more pending transactions are left, remove the list
+		if pending.Empty() {
+			delete(pool.pending, addr)
+			delete(pool.beats, addr)
+		}
+	}
+}
 // removeTx removes a single transaction from the queue, moving all subsequent
 // transactions back to the future queue.
 func (pool *TxPool) removeTx(hash common.Hash, outofbound bool) {
