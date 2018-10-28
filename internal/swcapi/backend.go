@@ -68,6 +68,9 @@ type Backend interface {
 
 	ChainConfig() *params.ChainConfig
 	CurrentBlock() *core.Block
+
+	MuLock()
+	MuUnLock()
 }
 
 func GetAPIs(apiBackend Backend) []rpc.API {

@@ -430,6 +430,8 @@ func (s *PrivateAccountAPI) SignTransaction(ctx context.Context, args SendTxArgs
 	if args.Nonce == nil {
 		return nil, fmt.Errorf("nonce not specified")
 	}
+	s.b.MuLock()
+	defer s.b.MuUnLock()
 	signed, err := s.signTransaction(ctx, args, passwd)
 	if err != nil {
 		return nil, err
@@ -1232,6 +1234,7 @@ func (args *SendTxArgs) toTransaction(wallet core.Wallet,b Backend) *core.Transa
 	}*/
 	//return core.NewTransaction(uint64(*args.Nonce), *args.To, (*big.Int)(args.Value), uint64(*args.Gas), (*big.Int)(args.GasPrice), input)
 	nodeID := b.GetNodeId()
+
 	return core.NewTransactionAmountFloat(wallet,uint64(*args.Nonce), args.To, args.Value, input,nodeID)
 }
 

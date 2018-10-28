@@ -18,6 +18,9 @@ func (cli *CLI) printChain(nodeID string) {
 
 		fmt.Printf("============ Block %x ============\n", block.Hash)
 		fmt.Printf("Height: %d\n", block.Height)
+		fmt.Printf("Diffculty: %d\n", block.Difficulty)
+		fmt.Printf("Nonce: %d\n", block.Nonce)
+		fmt.Printf("Timestamp: %d\n", block.Timestamp)
 		fmt.Printf("Prev. block: %x\n", block.PrevBlockHash)
 		//pow := core.NewProofOfWork(block,block.Difficulty.Int64())
 		//fmt.Printf("PoW: %s\n\n", strconv.FormatBool(pow.Validate()))

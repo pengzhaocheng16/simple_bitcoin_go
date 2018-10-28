@@ -180,8 +180,8 @@ func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to co
 		log.Info("===Manager.Peers.Peers len %d ","info",len(Manager.Peers.Peers))
 		signedTx.InitFrom(b.swc.txPool.Signer)
 		// TODO pool lock mangement
-		Manager.Mu.Lock()
-		defer Manager.Mu.Unlock()
+		/*Manager.Mu.Lock()
+		defer Manager.Mu.Unlock()*/
 		/*for _, p := range Manager.Peers.Peers {
 			SendTx(p, p.Rw, signedTx)
 		}*/
@@ -267,3 +267,11 @@ func (b *SwcAPIBackend) ChainDb() ethdb.Database {
 func (b *SwcAPIBackend) EventMux() *event.TypeMux {
 	return b.swc.EventMux()
 }*/
+
+func (b *SwcAPIBackend) MuLock() {
+	Manager.Mu.Lock()
+}
+
+func (b *SwcAPIBackend) MuUnLock() {
+	Manager.Mu.Unlock()
+}

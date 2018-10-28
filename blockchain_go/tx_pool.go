@@ -789,12 +789,13 @@ func (pool *TxPool) RemoveTx(hash common.Hash){
 	}
 	addr, _ := Sender(pool.Signer, tx) // already validated during insertion
 
-	pending := pool.pending[addr]
-	if removed, _ := pending.Remove(tx); removed {
-		// If no more pending transactions are left, remove the list
-		if pending.Empty() {
-			delete(pool.pending, addr)
-			delete(pool.beats, addr)
+	if pending := pool.pending[addr]; pending != nil {
+		if removed, _ := pending.Remove(tx); removed {
+			// If no more pending transactions are left, remove the list
+			if pending.Empty() {
+				delete(pool.pending, addr)
+				delete(pool.beats, addr)
+			}
 		}
 	}
 }

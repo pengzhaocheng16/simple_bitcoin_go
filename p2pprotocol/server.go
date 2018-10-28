@@ -312,10 +312,10 @@ func SendVersion(addr p2p.MsgWriter, bc *core.Blockchain) {
 }
 
 func sendVersionStartConflict(addr p2p.MsgWriter, historyLastblock *core.Block, bc *core.Blockchain,blocktodel map[string]common.Hash,remoteBlockHash *common.Hash) {
-	if historyLastblock == nil {
+	/*if historyLastblock == nil {
 		var block = bc.GetLastBlock()
 		historyLastblock = &block
-	}
+	}*/
 	bestHeight := historyLastblock.Height
 	lasthash := hex.EncodeToString(historyLastblock.Hash.Bytes())
 	version := verzion{nodeVersion, bestHeight,lasthash, nodeAddress,blocktodel,historyLastblock,remoteBlockHash}
@@ -368,6 +368,8 @@ func handleBlock(p *Peer, command Command, bc *core.Blockchain) {
 	block := core.DeserializeBlock(blockData)
 	fmt.Println("Recevied new Block hash %x \n", block.Hash)
 
+	Manager.Mu.Lock()
+	defer Manager.Mu.Unlock()
 	valid,reason := bc.IsBlockValid(block)
 	if( valid ){
 		log.Println("--start block valid op")
@@ -553,9 +555,9 @@ func handleGetData(p *Peer,command Command, bc *core.Blockchain) {
 	}
 
 	if payload.Type == "block" {
+
 		Manager.Mu.Lock()
 		defer Manager.Mu.Unlock()
-
 		log.Println("== bf get block!")
 		block, err := bc.GetBlock(payload.ID)
 		if err != nil {
@@ -761,7 +763,9 @@ func mineBlock(bc *core.Blockchain) error{
 
 				events := bc.Events([]*core.Block{newBlock})
 				go bc.PostChainEvents(events,nil)//not work !
+
 				Manager.txPool.RemoveTx(tx.CommonHash())
+
 			}
 		}
 		fmt.Println("==>after mine len(pending) ",len(pending))
@@ -776,6 +780,8 @@ func mineBlock(bc *core.Blockchain) error{
 func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 	var buff bytes.Buffer
 	var payload verzion
+	Manager.Mu.Lock()
+	defer Manager.Mu.Unlock()
 
 	//buff.Write(request[commandLength:])
 	buff.Write(command.Data)
@@ -819,7 +825,12 @@ func handleVersion(p *Peer, command Command, bc *core.Blockchain) {
 			}else{
 			valid,reason := bc.IsBlockValidPreHash(payload.LastBlock,&payload.LastBlock.PrevBlockHash)
 			if valid {
-				if(payload.LastBlock.Timestamp.Cmp(currentForkBlock.Timestamp) < 0 ){
+				if(payload.LastBlock.Timestamp.Cmp(currentForkBlock.Timestamp) < 0 ||
+					(payload.LastBlock.Timestamp.Cmp(currentForkBlock.Timestamp) == 0 &&
+						payload.LastBlock.Difficulty.Cmp(currentForkBlock.Difficulty)>0)||
+						( payload.LastBlock.Timestamp.Cmp(currentForkBlock.Timestamp) == 0 &&
+							payload.LastBlock.Difficulty.Cmp(currentForkBlock.Difficulty) == 0&&
+							payload.LastBlock.Nonce > currentForkBlock.Nonce )){
 					var Blocks = bc.GetBlockHashesMap(payload.LastBlock.PrevBlockHash.Bytes())
 					deletedblocks := bc.DelBlockHashes(Blocks)
 					log.Println("deletedblocks len :",len(deletedblocks))

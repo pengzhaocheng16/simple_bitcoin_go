@@ -208,10 +208,9 @@ func (bc *Blockchain) AddBlock(block *Block) {
 
 // FindTransaction finds a transaction by its ID
 func (bc *Blockchain) FindTransaction(ID []byte) (Transaction, error) {
-	var tnx Transaction
-	//bci := bc.Iterator()
-	//for {
-		/*block := bci.Next()
+	/*bci := bc.Iterator()
+	for {
+		block := bci.Next()
 		var ids = hex.EncodeToString(ID)
 		fmt.Printf("tx.ID: \"%s\" \n", ids)
 		for _, tx := range block.Transactions {
@@ -222,7 +221,9 @@ func (bc *Blockchain) FindTransaction(ID []byte) (Transaction, error) {
 		if bytes.Equal(block.PrevBlockHash.Bytes(),common.BytesToHash([]byte{}).Bytes())  {
 			break
 		}
-		*/
+
+	}*/
+		var tnx Transaction
 		err := bc.Db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte(blocksBucket))
 			blockb := tx.Bucket([]byte(utxoBlockBucket))
@@ -243,7 +244,6 @@ func (bc *Blockchain) FindTransaction(ID []byte) (Transaction, error) {
 		if(&tnx != nil){
 			return tnx,nil
 		}
-	//}
 
 	return Transaction{}, errors.New("Transaction is not found")
 }
@@ -252,7 +252,7 @@ func (bc *Blockchain) FindTransaction(ID []byte) (Transaction, error) {
 func (bc *Blockchain) FindUTXO() (map[string]TXOutputs,map [string]common.Hash) {
 	UTXO := make(map[string]TXOutputs)
 	UTXOBlock := make(map[string]common.Hash)
-	//TODO put spentTXOs in bucket
+	// put spentTXOs in bucket
 	spentTXOs := make(map[string][]int)
 	bci := bc.Iterator()
 
