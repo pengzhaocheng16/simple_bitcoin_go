@@ -8,6 +8,7 @@ import (
 	"time"
 	"encoding/hex"
 	"../blockchain_go/state"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func (cli *CLI) send(from, to string, amount *float64, nodeID string, mineNow bool) {
@@ -56,11 +57,12 @@ func (cli *CLI) send(from, to string, amount *float64, nodeID string, mineNow bo
 		fmt.Println("==>NewCoinbaseTX ")
 		//var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(from)))
 		//var nonce = statedb.GetNonce(addr)
-		var nonce,_ = statedb.GetTransactionNonce(address)
+		coinbaseFrom :=  common.Address{}
+		var nonce,_ = statedb.GetTransactionNonce(coinbaseFrom.String())
 
 		cbTx := core.NewCoinbaseTX(nonce,from, "",nodeID)
 		txs := []*core.Transaction{cbTx, tx}
-		statedb.PutTransaction(cbTx.ID,cbTx.Serialize(),from)
+		statedb.PutTransaction(cbTx.ID,cbTx.Serialize(),coinbaseFrom.String())
 
 		newBlock := bc.MineBlock(txs)
 		UTXOSet.Update(newBlock)

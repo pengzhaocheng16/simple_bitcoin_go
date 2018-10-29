@@ -713,14 +713,16 @@ func mineBlock(bc *core.Blockchain) error{
 		fmt.Println("==>GetTransactionNonce")
 		//var nonce = pendingState.GetNonce(core.Base58ToCommonAddress([]byte(miningAddress)))
 
-		var commonaddr = core.Base58ToCommonAddress([]byte(miningAddress))
+		//var commonaddr = core.Base58ToCommonAddress([]byte(miningAddress))
 		sdb := state.WalletTransactions{}
 		//sdb.NodeId = bc.NodeId
-		var nonce,_ = sdb.GetTransactionNonce(commonaddr.String())
+
+		coinbaseFrom :=  common.Address{}
+		var nonce,_ = sdb.GetTransactionNonce(coinbaseFrom.String())
 		//var nonce = pendingState.GetNonce(commonaddr)
 		fmt.Println("==>NewCoinbaseTX ")
 		cbTx := core.NewCoinbaseTX(nonce,miningAddress, "",bc.NodeId)
-		sdb.PutTransaction(cbTx.ID,cbTx.Serialize(),commonaddr.String())
+		sdb.PutTransaction(cbTx.ID,cbTx.Serialize(),coinbaseFrom.String())
 		//pendingState.SetNonce(commonaddr,nonce)
 
 		fmt.Println("==>MineBlock ")
@@ -1197,7 +1199,6 @@ func gobDecode(data []byte, to interface{}) error {
 	return dec.Decode(to)
 }
 
-
 func nodeIsKnown(addr string) bool {
 	for _, node := range BootNodes {
 		if node == addr {
@@ -1208,11 +1209,12 @@ func nodeIsKnown(addr string) bool {
 	return false
 }
 
-
 func handleConflict(p *Peer, command Command, bc *core.Blockchain) {
 	var buff bytes.Buffer
 	var payload statusData
 
+	Manager.Mu.Lock()
+	defer Manager.Mu.Unlock()
 	//buff.Write(request[commandLength:])
 	buff.Write(command.Data)
 	dec := gob.NewDecoder(&buff)
@@ -1245,9 +1247,8 @@ func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload sta
 		var found *common.Hash
 		var hashs2del = make(map[string]common.Hash)
 		var hash0 = common.Hash{}
-		var conflictBlock core.Block
+		var conflictBlock *core.Block
 		var remoteblockhash *common.Hash
-		var err1 error
 		var j = 0
 		var i = 0
 	outer1:for ; lastHash.String() != hash0.String() && j <100; {
@@ -1263,11 +1264,13 @@ func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload sta
 					hashs2del[lastHash.String()] = lastHash
 				}
 			}
-		    conflictBlock, err1 = bc.GetBlock(lastHash.Bytes())
+		    lastBlock, err1 := bc.GetBlock(lastHash.Bytes())
 			if err1 != nil {
 				log.Panic(err1)
 			}
+			conflictBlock = &lastBlock
 			lastHash = conflictBlock.PrevBlockHash
+			log.Println("lastHash ",lastHash.String())
 			j = j + 1
 		}
 	    log.Println("fork blocks len(hashs2del) !",len(hashs2del))
@@ -1278,6 +1281,11 @@ func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload sta
 		utxo := core.UTXOSet{bc}
 		utxo.Recover(blocksDeleted)
 	}*/
+
+	if found == nil&&conflictBlock == nil {
+		log.Println("no fork now!")
+		return
+	}
 		if found == nil {
 			log.Println("no blocks found !")
 			Manager.removePeer(p.id,bc)
@@ -1288,7 +1296,7 @@ func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload sta
 			}
 			log.Println(" fork point block found ! ",found.String())
 			log.Println(" fork block hash ",conflictBlock.Hash.String())
-			sendVersionStartConflict(p.Rw, &conflictBlock, bc,nil,remoteblockhash)
+			sendVersionStartConflict(p.Rw, conflictBlock, bc,nil,remoteblockhash)
 		}
 }
 
