@@ -570,8 +570,20 @@ func handleGetData(p *Peer,command Command, bc *core.Blockchain) {
 	}
 
 	if payload.Type == "tx" {
-		txID := hex.EncodeToString(payload.ID)
-		tx := Manager.TxMempool[txID]
+		//txID := hex.EncodeToString(payload.ID)
+		//tx := Manager.TxMempool[txID]
+		var txs  = make( []*core.Transaction,0)
+		var pedding,_ = Manager.txPool.Pending()
+		for _,tnxs := range pedding{
+			txs = append(txs,tnxs...)
+		}
+		var tx *core.Transaction
+		var tnx *core.Transaction
+		for tnx = range txs {
+			if bytes.Equal(tnx.ID,payload.ID){
+				tx = tnx
+			}
+		}
 
 		if(tx!=nil){
 			//SendTx(payload.AddrFrom, &tx)
