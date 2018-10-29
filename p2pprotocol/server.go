@@ -1282,7 +1282,7 @@ func getStartAndSendVersion(bc *core.Blockchain,lastHash common.Hash,payload sta
 		utxo.Recover(blocksDeleted)
 	}*/
 
-	if found == nil&&conflictBlock == nil {
+	if found != nil&&conflictBlock == nil {
 		log.Println("no fork now!")
 		return
 	}
