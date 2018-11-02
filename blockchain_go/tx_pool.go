@@ -197,8 +197,14 @@ func NewTxPool(config TxPoolConfig,chainconfig *params.ChainConfig,bc *Blockchai
 	pool.locals = newAccountSet(pool.Signer)
 	pool.InitDB()
 
-	pool.reset(nil, bc.CurrentBlock())
 
+	return pool
+}
+
+func (pool *TxPool) InitPool(){
+	var bc = pool.Bc
+	pool.reset(nil, bc.CurrentBlock())
+	var config = pool.config
 	// If local transactions and journaling is enabled, load from disk
 	if !config.NoLocals && config.Journal != "" {
 		pool.journal = newTxJournal(config.Journal)
@@ -216,15 +222,13 @@ func NewTxPool(config TxPoolConfig,chainconfig *params.ChainConfig,bc *Blockchai
 	// Start the event loop and return
 	pool.wg.Add(1)
 	go pool.loop()
-
-	return pool
 }
-
 
 // loop is the transaction pool's main event loop, waiting for and reacting to
 // outside blockchain events as well as for various reporting and transaction
 // eviction events.
 func (pool *TxPool) loop() {
+
 	defer pool.wg.Done()
 	// Start the stats reporting and transaction eviction tickers
 	var prevPending, prevQueued/*, prevStales*/ int
@@ -1336,4 +1340,12 @@ func (t *txLookup) Remove(hash common.Hash) {
 	defer t.lock.Unlock()
 
 	delete(t.all, hash)
+}
+
+func (pool *TxPool)Lock(){
+	pool.mu.Lock()
+}
+
+func (pool *TxPool)Unlock(){
+	pool.mu.Unlock()
 }

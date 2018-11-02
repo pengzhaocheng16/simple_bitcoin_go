@@ -573,13 +573,13 @@ func handleGetData(p *Peer,command Command, bc *core.Blockchain) {
 		//txID := hex.EncodeToString(payload.ID)
 		//tx := Manager.TxMempool[txID]
 		var txs  = make( []*core.Transaction,0)
-		var pedding,_ = Manager.txPool.Pending()
-		for _,tnxs := range pedding{
+		var pendding,_ = Manager.txPool.Pending()
+		for _,tnxs := range pendding{
 			txs = append(txs,tnxs...)
 		}
 		var tx *core.Transaction
 		var tnx *core.Transaction
-		for tnx = range txs {
+		for _,tnx = range txs {
 			if bytes.Equal(tnx.ID,payload.ID){
 				tx = tnx
 			}
@@ -687,11 +687,15 @@ func mineBlock(bc *core.Blockchain) error{
 			txs = append(txs, txMine)
 		}
 	}
+	//bc.Db.Close()
+	//bc = core.NewBlockchain(bc.NodeId)
+	//defer bc.Db.Close()
+	fmt.Println("==>len valid tx",len(txs))
 	//if len(Manager.TxMempool) >= 2 && len(miningAddress) > 0 {
 	if len(txs) >= 2 && len(miningAddress) > 0 {
 		fmt.Println("==>Loopsync")
 		//wait block sync complete
-		select{
+		/*select{
 		case ch := <- Manager.BestTd:
 			td,_ := bc.GetBestHeight()
 			log.Println("---td 1:",td)
@@ -699,7 +703,7 @@ func mineBlock(bc *core.Blockchain) error{
 				log.Println("---td:",ch)
 				break
 			}
-		}
+		}*/
 
 		fmt.Println("==>VerifyTx ")
 		/*queueFile := state.GenWalletStateDbName(bc.NodeId)

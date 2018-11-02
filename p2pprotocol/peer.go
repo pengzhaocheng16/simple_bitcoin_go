@@ -188,6 +188,8 @@ func (pm *ProtocolManager) removePeer(id string,blockchain *core.Blockchain) {
 // BroadcastTxs will propagate a batch of transactions to all peers which are not known to
 // already have the given transaction.
 func (pm *ProtocolManager) BroadcastTxs(txs core.Transactions) {
+	//pm.txPool.Lock()
+	//defer pm.txPool.Unlock()//because pool is using blockchain database
 	var txset = make(map[*Peer]core.Transactions)
 
 	// Broadcast transactions to a batch of peers not knowing about it
@@ -372,10 +374,10 @@ func (pm *ProtocolManager) minedBroadcastLoop() {
 
 func (pm *ProtocolManager) Start(maxPeers int) {
 	pm.maxPeers = maxPeers
-
 	pm.txsCh = make(chan core.NewTxsEvent, txChanSize)
 	pm.txsSub = pm.txPool.SubscribeNewTxsEvent(pm.txsCh)
 	go pm.txBroadcastLoop()
+	pm.txPool.InitPool()
 
 	// broadcast mined blocks
 	/*pm.minedBlockSub = pm.eventMux.Subscribe(core.NewMinedBlockEvent{})
