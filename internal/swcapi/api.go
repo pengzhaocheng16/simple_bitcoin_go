@@ -53,6 +53,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/btcsuite/btcutil"
 )
 
 const (
@@ -366,10 +367,11 @@ func (s *PrivateAccountAPI) signTransaction(ctx context.Context, args SendTxArgs
 	if err != nil {
 		return nil,err
 	}
-	fmt.Printf("===bf signTransaction  GetWallet\n")
-	wallet := wallets.GetWallet(core.CommonAddressToBase58(&args.From))
+	fmt.Printf("===bf signTransaction  GetWallet :\n",args.From.String())
+	//wallet := wallets.GetWallet(core.CommonAddressToBase58(&args.From))
+	wallet := wallets.GetWallet(args.From.String())
 
-	fmt.Printf("===bf signTransaction  setDefaults\n")
+	fmt.Printf("===bf signTransaction  setDefaults :\n",wallet.ToCommonAddress().String())
 	// Set some sanity defaults and terminate on failure
 	if err := args.setDefaults(ctx, s.b); err != nil {
 		return nil, err
@@ -377,11 +379,11 @@ func (s *PrivateAccountAPI) signTransaction(ctx context.Context, args SendTxArgs
 	fmt.Printf("===bf toTransaction  \n")
 	// Assemble the transaction and sign with the wallet
 	tx := args.toTransaction(wallet,s.b)
+	if tx == nil {
+		return nil,errors.New("to transaction error")
+	}
 
 	fmt.Printf("===af toTransaction tx  \n")
-	//In order to prevent double spend（check fail) need to store prev uncomfirmed transaction input tx
-	core.PendingIn(s.b.GetNodeId(),tx)
-	//fmt.Printf("===af PendingIn tx  \n")
 
 	var chainID *big.Int = nil
 	if config := s.b.ChainConfig(); config.IsEIP155(s.b.CurrentBlock().Height) {
@@ -565,16 +567,38 @@ func (s *PublicBlockChainAPI) GetBlockByNumber(ctx context.Context, blockNr rpc.
 	}
 	return nil, err
 }
-
 // GetTxInOuts returns the requested block. When blockNr is -1 the chain head is returned. When fullTx is true all
 // transactions in the block are returned in full detail, otherwise only the transaction hash is returned.
-func (s *PublicBlockChainAPI) GetTxInOuts(ctx context.Context, from common.Address, to common.Address, amount big.Int) (map[string]interface{}, error) {
-	txinputs,txoutputs, err := s.b.GetTxInOuts(ctx,from,to,&amount)
+func (s *PublicBlockChainAPI) GetTxInOuts(ctx context.Context, from common.Address, to common.Address, amount int64) (map[string]interface{}, error) {
+	if(amount < 0 || amount > btcutil.MaxSatoshi){
+		return nil,errors.New("invalid ammount error")
+	}
+	txinputs,txoutputs, err := s.b.GetTxInOuts(ctx,from,to,big.NewInt(amount))
 	fmt.Println("txinputs ",txinputs)
 	if txinputs != nil && txoutputs!=nil && err == nil {
+		var txinputsmaparr []map[string]interface{}
+		var txinputsmap map[string]interface{}
+		var txoutputsmaparr []map[string]interface{}
+		var txoutputsmap map[string]interface{}
+		for _,in := range txinputs {
+			txinputsmap = map[string]interface{}{
+				"Txid":hexutil.Encode(in.Txid),
+				"Vout":in.Vout,
+				"PubKey":hexutil.Encode(in.PubKey),
+				"Signature":in.Signature,
+			}
+			txinputsmaparr = append(txinputsmaparr,txinputsmap)
+		}
+		for _,out := range txoutputs {
+			txoutputsmap = map[string]interface{}{
+				"Value":out.Value,
+				"PubKeyHash":hexutil.Encode(out.PubKeyHash),
+			}
+			txoutputsmaparr = append(txoutputsmaparr,txoutputsmap)
+		}
 		fields := map[string]interface{}{
-			"inputs":txinputs,
-			"outpusts":txoutputs,
+			"inputs":txinputsmaparr,
+			"outputs":txoutputsmaparr,
 		}
 		return fields, err
 	}
@@ -1300,17 +1324,98 @@ func (s *PublicTransactionPoolAPI) SendTransaction(ctx context.Context, args Sen
 	return submitTransaction(ctx, s.b, signed)
 }
 */
+
+// Transaction represents a Bitcoin transaction
+type Transaction struct {
+	ID   []byte
+	Vin  []byte
+	Vout []byte
+	Timestamp *big.Int
+	//size atomic.Value
+	Data []byte
+	//from atomic.Value
+}
+
 // SendRawTransaction will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce.
 func (s *PublicTransactionPoolAPI) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
-	tx := new(core.Transaction)
+	tx := new(Transaction)
 	if err := rlp.DecodeBytes(encodedTx, tx); err != nil {
 		return common.Hash{}, err
 	}
+	//fmt.Println("docoded bytes:",tx)
+	/*id := make([]byte,32)
+	if err := rlp.DecodeBytes(tx.ID, &id); err != nil {
+		return common.Hash{}, err
+	}*/
+	id := tx.ID
+	txins := make([][]byte,0)
+	if err := rlp.DecodeBytes(tx.Vin, &txins); err != nil {
+		fmt.Println("docoded bytes Vin:",tx.Vin)
+		return common.Hash{}, err
+	}
+	//fmt.Println("docoded bytes txins:",txins)
+	var txinps = make([]core.TXInput,0)
+	for _,in := range txins{
+		txin := core.TXInput{}
+		if err := rlp.DecodeBytes(in, &txin); err != nil {
+			fmt.Println("docoded bytes in:",in)
+			return common.Hash{}, err
+		}
+		txinps = append(txinps,txin)
+	}
+	//fmt.Println("docoded bytes txinps:",txinps)
+
+	txouts := make([][]byte,0)
+	if err := rlp.DecodeBytes(tx.Vout, &txouts); err != nil {
+		fmt.Println("docoded bytes Vout:",tx.Vout)
+		return common.Hash{}, err
+	}
+	//fmt.Println("docoded bytes txouts:",txouts)
+	txoutps := make([]core.TXOutput,0)
+	for _,out := range txouts{
+		txout := core.TXOutput{}
+		if err := rlp.DecodeBytes(out, &txout); err != nil {
+			fmt.Println("docoded bytes out:",out)
+			return common.Hash{}, err
+		}
+		txoutps = append(txoutps,txout)
+	}
+	//fmt.Println("docoded bytes txoutps:",txoutps)
+	//timestamp := big.NewInt(0)
+	//timestamp := big.NewInt(core.HexToInt(tx.Timestamp))
+	fmt.Println("docoded bytes timestamp:",tx.Timestamp)
+	/*if err := rlp.DecodeBytes(tx.Timestamp, timestamp); err != nil {
+		fmt.Println("docoded bytes timestamp:",timestamp)
+		return common.Hash{}, err
+	}*/
+	/*var txdatas = make([][]byte,0)
+	if err := rlp.DecodeBytes(tx.Data, &txdatas); err != nil {
+		fmt.Println("docoded bytes txdata:",txdatas)
+		return common.Hash{}, err
+	}*/
+	//var txdata = txdata{}
+	var txdata = core.Txdata()
+	fmt.Println("docoded bytes tx.Data:",tx.Data)
+	if err := rlp.DecodeBytes(tx.Data, &txdata); err != nil {
+		fmt.Println("docoded bytes txdata:",txdata)
+		return common.Hash{}, err
+	}
+	var tnx = &core.Transaction{
+		ID:id,
+		Vin:txinps,
+		Vout:txoutps,
+		Timestamp:tx.Timestamp,
+		Data:txdata,
+	}
+	fmt.Println("docoded bytes:",tnx)
 	//nodeID := s.b.GetNodeId()
 	//tx1 = core.NewTransactionSigned(tx.RawSignatureValues(),tx.Nonce(), tx.To(), tx.Value(), tx.Data(),nodeID)
-	var signer = core.HomesteadSigner{}
-	return submitTransaction(ctx, s.b, tx,tx.From(signer))
+	//var signer = core.HomesteadSigner{}
+	signer := core.MakeSigner(s.b.ChainConfig(), s.b.CurrentBlock().Height)
+	var from = tnx.From(signer)
+	fmt.Println("from:",from.String())
+	return submitTransaction(ctx, s.b, tnx,from)
 }
 /*
 // Sign calculates an ECDSA signature for:

@@ -49,7 +49,8 @@ func (cli *CLI) send(from, to string, amount *float64, nodeID string, mineNow bo
 	var nonce,_ = statedb.GetTransactionNonce(address)
 	pendingState.SetNonce(addr,nonce)
 	statedb.Finalise(true)
-	tx := core.NewUTXOTransaction(nonce,&wallet, to, amount,[]byte{}, &UTXOSet,nodeID)
+	toaddr := common.HexToAddress(to)
+	tx := core.NewUTXOTransaction(nonce,&wallet, toaddr, amount,[]byte{}, &UTXOSet,nodeID)
 
 	if mineNow {
 		statedb.PutTransaction(tx.ID,tx.Serialize(),address)
@@ -60,7 +61,8 @@ func (cli *CLI) send(from, to string, amount *float64, nodeID string, mineNow bo
 		coinbaseFrom :=  common.Address{}
 		var nonce,_ = statedb.GetTransactionNonce(coinbaseFrom.String())
 
-		cbTx := core.NewCoinbaseTX(nonce,from, "",nodeID)
+		fromaddr := common.HexToAddress(from)
+		cbTx := core.NewCoinbaseTX(nonce,fromaddr, "",nodeID)
 		txs := []*core.Transaction{cbTx, tx}
 		statedb.PutTransaction(cbTx.ID,cbTx.Serialize(),coinbaseFrom.String())
 
@@ -139,7 +141,8 @@ func (cli *CLI) send(from, to string, amount *float64, nodeID string, mineNow bo
 			//var nonce = statedb.GetNonce(addr)
 			pendingState.SetNonce(addr,nonce)
 			statedb.Finalise(true)
-			tx := core.NewUTXOTransaction(nonce+1,&wallet, toaddress, &amountnum, []byte{},&UTXOSet,nodeID)
+			toaddr := common.HexToAddress(toaddress)
+			tx := core.NewUTXOTransaction(nonce+1,&wallet, toaddr, &amountnum, []byte{},&UTXOSet,nodeID)
 			for _, p := range p2pprotocol.Manager.Peers.Peers {
 				p2pprotocol.SendTx(p, p.Rw, tx)
 			}

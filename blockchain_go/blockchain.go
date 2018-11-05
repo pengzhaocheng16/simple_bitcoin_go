@@ -78,7 +78,8 @@ func CreateBlockchain(address, nodeID string) *Blockchain {
 	/*for key, value := range account.Storage {
 		statedb.SetState(addr, key, value)
 	}*/
-	cbtx := NewCoinbaseTX(0,address, genesisCoinbaseData,nodeID)
+	addr = common.HexToAddress(address)
+	cbtx := NewCoinbaseTX(0,addr, genesisCoinbaseData,nodeID)
 	genesis := NewGenesisBlock(cbtx)
 
 	db, err := bolt.Open(dbFile, 0600, nil)

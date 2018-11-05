@@ -85,6 +85,7 @@ func Sender(signer Signer, tx *Transaction) (common.Address, error) {
 	if err != nil {
 		return common.Address{}, err
 	}
+	addr.MarshalText()
 	tx.from.Store(sigCache{signer: signer, from: addr})
 	return addr, nil
 }
@@ -126,12 +127,13 @@ func (s EIP155Signer) Equal(s2 Signer) bool {
 var big8 = big.NewInt(8)
 
 func (s EIP155Signer) Sender(tx *Transaction) (common.Address, error) {
-	/*if !tx.Protected() {
+	if !tx.Protected() {
 		return HomesteadSigner{}.Sender(tx)
 	}
 	if tx.ChainId().Cmp(s.chainId) != 0 {
 		return common.Address{}, ErrInvalidChainId
-	}*/
+	}
+
 	fmt.Printf("-->tx %s:",tx)
 	V := new(big.Int).Sub(tx.Data.V, s.chainIdMul)
 	V.Sub(V, big8)

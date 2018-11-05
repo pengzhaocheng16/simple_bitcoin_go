@@ -84,18 +84,21 @@ func (b *SwcAPIBackend) GetBalance(ctx context.Context, address common.Address) 
 func (b *SwcAPIBackend)GetTxInOuts(ctx context.Context,from common.Address,to common.Address,amount *big.Int)([]core.TXInput,[]core.TXOutput,error){
 
 	bc := core.NewBlockchain(b.swc.nodeID)
+	defer bc.Db.Close()
 	utxo := core.UTXOSet{bc}
 	inputs,outputs,err := utxo.GetTxInOuts(from,to,amount,"")
+	if err != nil {
+		log.Info("--after  GetTxInOuts err: %s",err)
+		return nil,nil,err
+	}
+	fmt.Println("--after  GetTxInOuts len(inputs): %d",len(inputs))
 
 	//prevTXs := make(map[string]core.Transaction)
 
 	for _, vin := range inputs {
-		prevTX, err := bc.FindTransaction(vin.Txid)
+		//prevTX, err := bc.FindTransaction(vin.Txid)
 		vin.Signature = nil
-		vin.PubKey = prevTX.Vout[vin.Vout.Int64()].PubKeyHash
-		if err != nil {
-			return nil,nil,err
-		}
+		vin.PubKey = nil//prevTX.Vout[vin.Vout.Int64()].PubKeyHash
 		//prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
 	}
 

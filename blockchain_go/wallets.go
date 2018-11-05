@@ -35,9 +35,11 @@ func NewWallets(nodeID string) (*Wallets, error) {
 // CreateWallet adds a Wallet to Wallets
 func (ws *Wallets) CreateWallet() string {
 	wallet := NewWallet()
-	address := fmt.Sprintf("%s", wallet.GetAddress())
+	//address := fmt.Sprintf("%s", wallet.GetAddress())
+	var address = wallet.GetAddress()
+	addr := common.BytesToAddress(address)
 
-	ws.Wallets[address] = wallet
+	ws.Wallets[addr.String()] = wallet
 
 	d := wallet.PrivateKey.D.Bytes()
 
@@ -57,7 +59,7 @@ func (ws *Wallets) CreateWallet() string {
 	if err!=nil{
 		log.Panic(err)
 	}
-	return address
+	return addr.String()
 }
 
 // GetAddresses returns an array of addresses stored in the wallet file
@@ -75,14 +77,15 @@ func (ws *Wallets) GetAddresses() []string {
 func (ws Wallets) GetWallet(address string) Wallet {
 	wallet := *ws.Wallets[address]
 	prv,_ := crypto.ToECDSA(wallet.PrivateKey.D.Bytes())
-	wallet.PrivateKey = *prv
+	wallet.PrivateKey = *prv //relate to peer handshake
 	return wallet
 }
 
 // GetWallet returns a Wallet by its address
 func (ws Wallets) GetWalletCommonAddress(address *common.Address) Wallet {
-	var addressStr = CommonAddressToBase58(address)
-	wallet := *ws.Wallets[addressStr]
+	//var addressStr = CommonAddressToBase58(address)
+	addr := address.String()
+	wallet := *ws.Wallets[addr]
 	prv,_ := crypto.ToECDSA(wallet.PrivateKey.D.Bytes())
 	wallet.PrivateKey = *prv
 	return wallet

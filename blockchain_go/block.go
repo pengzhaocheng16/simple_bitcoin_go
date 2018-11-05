@@ -105,6 +105,11 @@ func (b *Block) HashTransactions() []byte {
 
 
 func rlpHash(x interface{}) (h common.Hash) {
+	/*d := []byte{}
+	d,_ = rlp.EncodeToBytes(x)
+	log.Println("---encoded  rlp :",d)
+	var hash256 = sha256.Sum256(d)
+	log.Println("---encoded  rlp hash256:",hash256)*/
 	hw := sha3.NewKeccak256()
 	rlp.Encode(hw, x)
 	hw.Sum(h[:0])

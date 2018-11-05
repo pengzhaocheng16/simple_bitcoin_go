@@ -518,7 +518,7 @@ func (u UTXOSet) VerifyTxTimeLineAndUTXOAmount(lastBlockTime *big.Int,block *Blo
 }
 
 func (u UTXOSet) IsUTXOAmountValid(tx *Transaction,preHash *common.Hash) bool{
-	pubKeyHash := HashPubKey(tx.Vin[0].PubKey)
+	pubKeyHash := HashPubKey256T(tx.Vin[0].PubKey)
 	var spenttxids = map[string]*TXInput{}
 	for _,txin := range tx.Vin{
 		spenttxids[hex.EncodeToString(txin.Txid)] = &txin
@@ -563,8 +563,7 @@ func (u UTXOSet) IsUTXOAmountValid(tx *Transaction,preHash *common.Hash) bool{
 }
 
 func (u *UTXOSet)GetTxInOuts(from common.Address,to common.Address,amount *big.Int,nodeID string)([]TXInput,[]TXOutput,error){
-	defer u.Blockchain.Db.Close()
-	var pubKeyHash []byte = from.Bytes()
+	var pubKeyHash256T []byte = from.Bytes()
 
 	/*// Convert the amount to honey.
 	honey, err := btcutil.NewAmount(subsidy)
@@ -574,7 +573,7 @@ func (u *UTXOSet)GetTxInOuts(from common.Address,to common.Address,amount *big.I
 		return nil,nil,errors.New(err.Error()+context)
 	}*/
 	var honey = amount.Int64()
-	acc, validOutputs,extraOutputs := u.FindSpendableOutputs(pubKeyHash, uint64(honey),false,nil,nil)
+	acc, validOutputs,extraOutputs := u.FindSpendableOutputs(pubKeyHash256T, uint64(honey),false,nil,nil)
 
 	if acc < uint64(honey) {
 		return nil,nil,ErrNotEnoughFunds
@@ -590,17 +589,19 @@ func (u *UTXOSet)GetTxInOuts(from common.Address,to common.Address,amount *big.I
 		}
 		for _, out := range outs {
 			//input := TXInput{txID, out, nil, wallet.PublicKey}
-			input := TXInput{txID, big.NewInt(int64(out)), nil, nil}
+			input := TXInput{txID, big.NewInt(int64(out)), nil, pubKeyHash256T}
 			inputs = append(inputs, input)
 		}
 	}
 	// Build a list of outputs
 	//from := fmt.Sprintf("%s", GetAddressFromPubkeyHash(pubKeyHash))
-	fromstr := fmt.Sprintf("%s", from)
-	tostr := fmt.Sprintf("%s", to)
-	outputs = append(outputs, *NewTXOutput(uint64(honey), tostr))
+	//fromstr := CommonAddressToBase58(&from)
+	//tostr := CommonAddressToBase58(&to)
+	fromarr := from.Bytes()
+	toarr := to.Bytes()
+	outputs = append(outputs, *NewTXOutput(uint64(honey), toarr))
 	if acc > uint64(honey) {
-		outputs = append(outputs, *NewTXOutput(uint64(acc-uint64(honey)), fromstr)) // a change
+		outputs = append(outputs, *NewTXOutput(uint64(acc-uint64(honey)), fromarr)) // a change
 	}
 	for _,txouts := range extraOutputs{
 		outputs = append(outputs,txouts...)

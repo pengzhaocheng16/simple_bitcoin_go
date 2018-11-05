@@ -193,7 +193,15 @@ func (pm *ProtocolManager) BroadcastTxs(txs core.Transactions) {
 	var txset = make(map[*Peer]core.Transactions)
 
 	// Broadcast transactions to a batch of peers not knowing about it
+	bc := core.NewBlockchain(pm.nodeID)
+	defer bc.Db.Close()
 	for _, tx := range txs {
+		if !bc.VerifyTransaction(tx){
+			continue
+		}
+		core.PendingIn(pm.nodeID,tx)
+		//fmt.Printf("===af PendingIn tx  \n")
+
 		peers := pm.Peers.PeersWithoutTx(tx.ID)
 		log.Println("---len(PeersWithoutTx)   ",len(peers))
 		for _, peer := range peers {
@@ -206,8 +214,6 @@ func (pm *ProtocolManager) BroadcastTxs(txs core.Transactions) {
 		peer.AsyncSendTransactions(txs)
 	}
 	//mine
-	bc := core.NewBlockchain(pm.nodeID)
-	defer bc.Db.Close()
 	mineBlock(bc)
 }
 
@@ -352,6 +358,8 @@ func (pm *ProtocolManager) txBroadcastLoop() {
 		select {
 		case event := <-pm.txsCh:
 			log.Println("---txBroadcastLoop :")
+			//In order to prevent double spend（check fail) need to store prev uncomfirmed transaction input tx
+			//fmt.Printf("===af PendingIn tx  \n")
 			pm.BroadcastTxs(event.Txs)
 			// Err() channel will be closed when unsubscribing.
 		case <-pm.txsSub.Err():

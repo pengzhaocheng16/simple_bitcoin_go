@@ -737,7 +737,8 @@ func mineBlock(bc *core.Blockchain) error{
 		var nonce,_ = sdb.GetTransactionNonce(coinbaseFrom.String())
 		//var nonce = pendingState.GetNonce(commonaddr)
 		fmt.Println("==>NewCoinbaseTX ")
-		cbTx := core.NewCoinbaseTX(nonce,miningAddress, "",bc.NodeId)
+		miningAddr := common.HexToAddress(miningAddress)
+		cbTx := core.NewCoinbaseTX(nonce,miningAddr, "",bc.NodeId)
 		sdb.PutTransaction(cbTx.ID,cbTx.Serialize(),coinbaseFrom.String())
 		//pendingState.SetNonce(commonaddr,nonce)
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"../blockchain_go"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func (cli *CLI) getBalance(address, nodeID string) {
@@ -22,8 +23,9 @@ func (cli *CLI) getBalance(address, nodeID string) {
 	for _, out := range UTXOs {
 		balance += out.Value
 	}*/
-	addressCommon := core.Base58ToCommonAddress([]byte(address))
-	balance := bc.GetBalance(addressCommon,nodeID);
+	//addressCommon := core.Base58ToCommonAddress([]byte(address))
+	addr := common.HexToAddress(address)
+	balance := bc.GetBalance(addr,nodeID);
 
 	fmt.Printf("Balance of '%s': %d\n", address, balance)
 }
