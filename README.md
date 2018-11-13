@@ -1,7 +1,7 @@
 # swarmcash_go
 simple version of bitcoin blockchain based on ethereum go version
 
-wallet has comming :https://github.com/pengzhaocheng16/eth-swh--hot-wallet
+wallet has comming 
 
 send transaction with method sendRawTransaction 
 
