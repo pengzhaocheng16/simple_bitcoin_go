@@ -1,7 +1,8 @@
 # swarmcash_go
 simple version of bitcoin blockchain based on ethereum go version
 
-wallet has comming 
+wallet is online:
+http://wallet.btc9988.com/
 
 send transaction with method sendRawTransaction 
 
