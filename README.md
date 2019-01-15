@@ -1,4 +1,4 @@
-# swarmcash_go
+# simple_bitcoin_go
 simple version of bitcoin blockchain based on ethereum go version
 
 wallet is online:
