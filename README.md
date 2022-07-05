@@ -1,4 +1,6 @@
 # simple_bitcoin_go
+important!!! this project is closed
+
 simple version of bitcoin blockchain based on ethereum go version
 
 wallet is online:
